@@ -49,18 +49,28 @@ To install by hand, download your platform's binary from the
 second.
 
 **agy** runs it from `statusLine` in `~/.gemini/antigravity-cli/settings.json`. agy only refreshes the line when
-the agent changes state, so the clock moves with activity rather than every second.
+the agent changes state, so the clock moves with activity rather than every second; it counts from the first entry
+of the conversation transcript.
 
-**Codex CLI** cannot run an external status line, so status_cli runs Codex instead:
+**Codex CLI** cannot run an external status line, so status_cli starts Codex for you. Use `codex-stt` wherever
+you would type `codex`; arguments pass through unchanged:
 
 ```sh
-status_cli codex
+codex-stt
+codex-stt --model gpt-6-luna
 ```
 
-Codex starts in a pseudo-terminal one row shorter than the window (ConPTY on Windows, openpty elsewhere) and the
-line is drawn on the last row of the same terminal. Keys, mouse, paste and resizes pass straight through, Codex's
-scroll regions are kept off the reserved row, arguments go to `codex` unchanged and its exit code is returned. Data
-comes from the newest session log in `~/.codex/sessions` (or `CODEX_HOME`), reread only when it changes.
+`codex-stt` is a shortcut that setup places next to the binary (`status_cli codex` does the same). Codex runs in a
+pseudo-terminal one row shorter than the window (ConPTY on Windows, openpty elsewhere) and the line is drawn on the
+last row of the same terminal:
+
+- keys, mouse, paste and resizes pass straight through, and clicks on the status row are ignored;
+- the line is only drawn between Codex frames, so it never splits an escape sequence, link or synchronized update;
+- Codex's scroll regions are kept off the reserved row, also across alternate-screen switches;
+- the data comes from the session this launch started in the current folder (resumed sessions included, sub-agents
+  ignored), with limits matched by window length and context computed the way Codex shows it;
+- Codex's exit code is returned and the terminal modes are restored even if it crashes.
+
 `status_cli codex --once` prints the line once for tmux status bars or shell prompts. Setup also enables Codex's
 native status line in `config.toml`, keeping comments and other settings, for when Codex is started directly.
 
@@ -92,7 +102,7 @@ Everything works out of the box. These environment variables change the defaults
 | `STATUS_CLI_ASCII` | ASCII instead of Unicode glyphs |
 | `NO_COLOR` | No colors |
 | `STATUS_CLI_LOG` | JSON Lines log with per-phase timings, host, model, effort and the rendered line |
-| `STATUS_CLI_CODEX` | Program to run instead of `codex` in `status_cli codex` |
+| `STATUS_CLI_CODEX` | Program to run instead of `codex` in `codex-stt` |
 
 ## Compatibility
 
@@ -110,7 +120,7 @@ Amazon Linux containers, and installs it from the published release on each plat
 | | Linux | Windows |
 | --- | --- | --- |
 | Process start to exit | 0.6 ms | 5.5 ms |
-| Time spent in status_cli | 0.08 ms | 0.18 ms |
+| Time spent in status_cli | 0.07 ms | 0.18 ms |
 
 Most of the Windows figure is the operating system creating the process. State is one small file per session in
 `status_cli/` under `XDG_RUNTIME_DIR`, `%LOCALAPPDATA%`, `XDG_CACHE_HOME` or `~/.cache`, read once per refresh,
