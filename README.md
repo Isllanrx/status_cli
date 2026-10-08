@@ -90,7 +90,8 @@ last row of the same terminal:
 - the line is only drawn between Codex frames, so it never splits an escape sequence, link or synchronized update;
 - Codex's scroll regions are kept off the reserved row, also across alternate-screen switches;
 - the data comes from the session this launch started in the current folder (resumed sessions included, sub-agents
-  ignored), with limits matched by window length and context computed the way Codex shows it;
+  ignored), with limits matched by window length and context computed the way Codex shows it; until Codex writes
+  that session, the line shows the configured model and the account's latest limits;
 - Codex's exit code is returned and the terminal modes are restored even if it crashes.
 
 `status_cli codex --once` prints the line once for tmux status bars or shell prompts. Setup also enables Codex's
