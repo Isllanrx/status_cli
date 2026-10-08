@@ -28,7 +28,7 @@ pub fn read(payload: &Payload, now: u64, session: &mut Session) -> Vec<Quota> {
         show_reset,
     };
     match payload.host() {
-        Host::Claude => {
+        Host::Claude | Host::Codex => {
             let limits = payload.rate_limits.as_ref();
             let five = limits.and_then(|l| l.five_hour.as_ref());
             let week = limits.and_then(|l| l.seven_day.as_ref());

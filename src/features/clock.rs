@@ -1,14 +1,38 @@
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+use std::time::UNIX_EPOCH;
+
 use crate::payload::{Host, Payload};
 use crate::state::Session;
 use crate::style::{Frame, LABEL, SOFT, STRONG, TRACK, paint};
 use crate::terminal::caps;
 
-pub fn read(payload: &Payload, session: &mut Session) -> Option<u64> {
+pub fn read(payload: &Payload, session: &mut Session, now: u64) -> Option<u64> {
     let base_ms = match payload.host() {
-        Host::Claude => payload.cost.as_ref()?.total_duration_ms?,
-        Host::Agy => payload.session_key().map(|_| 0)?,
+        Host::Claude | Host::Codex => payload.cost.as_ref()?.total_duration_ms?,
+        Host::Agy => {
+            payload.session_key()?;
+            conversation_started(payload).map_or(0, |started| now.saturating_sub(started))
+        }
     };
     Some(session.elapsed(base_ms))
+}
+
+fn conversation_started(payload: &Payload) -> Option<u64> {
+    let path = match payload.transcript_path.as_deref() {
+        Some(path) => PathBuf::from(path),
+        None => {
+            let id = payload.conversation_id.as_deref().or(payload.session_id.as_deref())?;
+            if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                return None;
+            }
+            let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
+            PathBuf::from(home).join(".gemini").join("antigravity-cli").join("conversations").join(format!("{id}.db"))
+        }
+    };
+    let created = fs::metadata(path).ok()?.created().ok()?;
+    Some(created.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64)
 }
 
 pub fn render(ms: u64, frame: &Frame) -> String {

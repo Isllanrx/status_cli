@@ -16,7 +16,7 @@ pub fn read(payload: &Payload, compact_override: Option<f64>, session: &mut Sess
             "compactar",
             window.and_then(|w| compact_progress(w.used_percentage?, w.context_window_size?, compact_override)),
         ),
-        Host::Agy => ("contexto", window.and_then(|w| w.used_percentage)),
+        Host::Agy | Host::Codex => ("contexto", window.and_then(|w| w.used_percentage)),
     };
     Context { label, motion: session.track(label, pct) }
 }

@@ -6,10 +6,11 @@ pub const MAX_COLUMNS: usize = 1000;
 const MAX_TEXT_CHARS: usize = 48;
 const MAX_KEY_CHARS: usize = 128;
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Payload {
     pub session_id: Option<String>,
     pub conversation_id: Option<String>,
+    pub transcript_path: Option<String>,
     pub product: Option<String>,
     pub model: Option<Model>,
     pub effort: Option<Effort>,
@@ -22,42 +23,42 @@ pub struct Payload {
     pub terminal_width: Option<usize>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Model {
     pub id: Option<String>,
     pub display_name: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Effort {
     pub level: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct RateLimits {
     pub five_hour: Option<Window>,
     pub seven_day: Option<Window>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Window {
     pub used_percentage: Option<f64>,
     pub resets_at: Option<f64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Quota {
     pub remaining_fraction: Option<f64>,
     pub reset_in_seconds: Option<f64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct ContextWindow {
     pub used_percentage: Option<f64>,
     pub context_window_size: Option<f64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Cost {
     pub total_duration_ms: Option<u64>,
 }
@@ -66,6 +67,7 @@ pub struct Cost {
 pub enum Host {
     Claude,
     Agy,
+    Codex,
 }
 
 impl Host {
@@ -73,6 +75,7 @@ impl Host {
         match self {
             Host::Claude => "claude",
             Host::Agy => "agy",
+            Host::Codex => "codex",
         }
     }
 }
@@ -105,14 +108,18 @@ impl Payload {
     }
 
     pub fn host(&self) -> Host {
-        let agy =
-            self.product.as_deref() == Some("antigravity") || self.conversation_id.is_some() || self.quota.is_some();
-        if agy { Host::Agy } else { Host::Claude }
+        match self.product.as_deref() {
+            Some("codex") => Host::Codex,
+            Some("antigravity") => Host::Agy,
+            _ if self.conversation_id.is_some() || self.quota.is_some() => Host::Agy,
+            _ => Host::Claude,
+        }
     }
 
     pub fn session_key(&self) -> Option<String> {
         let (prefix, id) = match self.host() {
             Host::Claude => ("", self.session_id.as_deref()?),
+            Host::Codex => ("codex-", self.session_id.as_deref()?),
             Host::Agy => ("agy-", self.conversation_id.as_deref().or(self.session_id.as_deref())?),
         };
         let id: String =

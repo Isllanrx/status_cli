@@ -12,7 +12,7 @@ pub struct Model {
 pub fn read(payload: &Payload) -> Option<Model> {
     let name = short_name(payload.model.as_ref()?.display_name.as_deref()?)?;
     let level = match payload.host() {
-        Host::Claude => payload.effort.as_ref().map(|e| e.level.as_str()),
+        Host::Claude | Host::Codex => payload.effort.as_ref().map(|e| e.level.as_str()),
         Host::Agy => payload.execution_mode.as_deref(),
     };
     let effort = level.map(str::trim).filter(|l| !l.is_empty()).map(capitalize);
