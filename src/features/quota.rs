@@ -82,7 +82,7 @@ impl Quota {
             out += &paint(SOFT, format_args!(" {} {left}", caps().glyphs.reset));
         }
         if let Some(to_full) = self.runs_out_in(frame.now) {
-            out += &paint(heat(100.0).bold(), format_args!(" esgota {}", duration(to_full)));
+            out += &paint(heat(100.0).bold(), format_args!(" {} {}", caps().glyphs.exhaust, duration(to_full)));
         }
         out
     }
@@ -106,7 +106,7 @@ mod tests {
     fn claude_shows_both_windows_with_session_reset() {
         let json = r#"{"rate_limits":{"five_hour":{"used_percentage":72,"resets_at":6400},
                        "seven_day":{"used_percentage":31,"resets_at":9000}}}"#;
-        assert_eq!(lines(json, false), ["sessão 72% ↻ 1h30m esgota 1h21m", "semana 31%"]);
+        assert_eq!(lines(json, false), ["sessão 72% ↻ 1h30m ⇥ 1h21m", "semana 31%"]);
         assert_eq!(lines(json, true), ["sessão 72%", "semana 31%"]);
     }
 
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn shows_projection_next_to_the_reset() {
         let json = r#"{"rate_limits":{"five_hour":{"used_percentage":80,"resets_at":11800}}}"#;
-        assert_eq!(lines(json, false)[0], "sessão 80% ↻ 3h00m esgota 30m");
+        assert_eq!(lines(json, false)[0], "sessão 80% ↻ 3h00m ⇥ 30m");
         assert_eq!(lines(json, true)[0], "sessão 80%");
     }
 
