@@ -33,7 +33,8 @@ irm https://raw.githubusercontent.com/Isllanrx/status_cli/main/install.ps1 | iex
 ```
 
 The installer picks the binary for your system, checks its SHA-256 against the release, places it in
-`~/.local/bin` (adding it to `PATH` on Windows) and runs `status_cli setup`. Setup adds the `statusLine` entry to
+`~/.local/bin` and runs `status_cli setup`. On Windows it also adds that folder to `PATH`; on Linux and macOS
+setup writes the binary's full path into the host settings, so it works whatever your `PATH` is. Setup adds the `statusLine` entry to
 the settings of every host it finds and keeps a `.bak-status_cli` copy of the previous file. Open a new session
 afterwards.
 
