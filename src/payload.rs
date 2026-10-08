@@ -50,6 +50,7 @@ pub struct Window {
 #[derive(Clone, Default, Deserialize)]
 pub struct Quota {
     pub remaining_fraction: Option<f64>,
+    pub reset_time: Option<String>,
     pub reset_in_seconds: Option<f64>,
 }
 

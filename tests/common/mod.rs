@@ -107,5 +107,6 @@ pub fn claude(session: &str, duration_ms: u64) -> String {
 }
 
 pub fn assert_clock(text: &str, hhmm: &str) {
-    assert!(text.ends_with(hhmm), "{text:?} should end with {hhmm}");
+    let clock = text.rsplit(' ').next().unwrap_or_default();
+    assert!(clock.starts_with(hhmm) && clock.len() == hhmm.len() + 3, "{text:?} should show {hhmm}:ss");
 }

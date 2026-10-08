@@ -1,12 +1,14 @@
 use std::env;
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::payload::{Host, Payload};
 use crate::state::Session;
 use crate::style::{Frame, LABEL, SOFT, STRONG, TRACK, paint};
 use crate::terminal::caps;
+use crate::time::parse_utc_millis;
 
 pub fn read(payload: &Payload, session: &mut Session, now: u64) -> Option<u64> {
     let base_ms = match payload.host() {
@@ -20,20 +22,29 @@ pub fn read(payload: &Payload, session: &mut Session, now: u64) -> Option<u64> {
 }
 
 fn conversation_started(payload: &Payload) -> Option<u64> {
-    let conversation_file = || {
-        let id = payload.conversation_id.as_deref().or(payload.session_id.as_deref())?;
-        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-            return None;
-        }
-        let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
-        Some(PathBuf::from(home).join(".gemini").join("antigravity-cli").join("conversations").join(format!("{id}.db")))
-    };
-    [payload.transcript_path.as_deref().map(PathBuf::from), conversation_file()]
+    let id = [payload.conversation_id.as_deref(), payload.session_id.as_deref()]
         .into_iter()
         .flatten()
-        .find_map(|path| fs::metadata(path).ok()?.created().ok())
-        .and_then(|created| created.duration_since(UNIX_EPOCH).ok())
-        .map(|since| since.as_millis() as u64)
+        .find(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))?;
+    let home = PathBuf::from(env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?)
+        .join(".gemini")
+        .join("antigravity-cli");
+    let transcript = home.join("brain").join(id).join(".system_generated").join("logs").join("transcript.jsonl");
+    first_created_at(&transcript)
+        .or_else(|| payload.transcript_path.as_deref().and_then(|path| first_created_at(Path::new(path))))
+        .or_else(|| file_created(&home.join("conversations").join(format!("{id}.db"))))
+}
+
+fn first_created_at(transcript: &Path) -> Option<u64> {
+    let mut line = String::new();
+    BufReader::new(File::open(transcript).ok()?).read_line(&mut line).ok()?;
+    let record: serde_json::Value = serde_json::from_str(&line).ok()?;
+    parse_utc_millis(record["created_at"].as_str()?)
+}
+
+fn file_created(path: &Path) -> Option<u64> {
+    let created = fs::metadata(path).ok()?.created().ok()?;
+    Some(created.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64)
 }
 
 pub fn render(ms: u64, frame: &Frame) -> String {
@@ -44,9 +55,10 @@ pub fn render(ms: u64, frame: &Frame) -> String {
     let colon = paint(if frame.odd_second() { TRACK } else { STRONG }, ':');
     let minutes_style = if minute_turned { STRONG.underline() } else { STRONG };
     format!(
-        "{label}{hand}{}{colon}{}",
+        "{label}{hand}{}{colon}{}{}",
         paint(STRONG, format_args!("{:02}", minutes / 60)),
         paint(minutes_style, format_args!("{:02}", minutes % 60)),
+        paint(LABEL, format_args!(":{:02}", (ms / 1000) % 60)),
     )
 }
 
@@ -58,8 +70,8 @@ mod tests {
     #[test]
     fn renders_animated_hh_mm() {
         let frame = Frame { now: 1_000, bar_width: 0, tight: false };
-        assert_eq!(strip(&render(3_900_000, &frame)), "tempo ◷ 01:05");
-        assert_eq!(strip(&render(59_000, &Frame { tight: true, ..frame })), "◷ 00:00");
+        assert_eq!(strip(&render(3_900_000, &frame)), "tempo ◷ 01:05:00");
+        assert_eq!(strip(&render(59_000, &Frame { tight: true, ..frame })), "◷ 00:00:59");
     }
 
     #[test]

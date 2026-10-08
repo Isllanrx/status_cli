@@ -146,3 +146,19 @@ fn ansi16_terminals_only_get_basic_colors() {
     let raw = run_raw(&temp, &claude("a", 0), &[("TERM", "linux")]);
     assert!(raw.contains("\x1b[") && !raw.contains("38;2;") && !raw.contains("38;5;"), "{raw:?}");
 }
+
+#[test]
+fn agy_clock_starts_at_the_transcript_creation_time() {
+    let temp = TempDir::new();
+    let logs =
+        temp.0.join(".gemini").join("antigravity-cli").join("brain").join("c-1").join(".system_generated").join("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(logs.join("transcript.jsonl"), "{\"step_index\":0,\"created_at\":\"2000-01-01T00:00:00Z\"}\n")
+        .unwrap();
+    let input = r#"{"product":"antigravity","conversation_id":"c-1","model":{"display_name":"Gemini 3.8 Flash"},"terminal_width":150}"#;
+    let out =
+        run_with(&temp, input, None, &[("HOME", temp.0.to_str().unwrap()), ("USERPROFILE", temp.0.to_str().unwrap())]);
+    let clock = out.text.rsplit(' ').next().unwrap();
+    let hours: u64 = clock.split(':').next().unwrap().parse().unwrap();
+    assert!(hours > 200_000, "{:?}", out.text);
+}

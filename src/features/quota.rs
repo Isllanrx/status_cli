@@ -4,6 +4,7 @@ use crate::payload::{self, Host, Payload};
 use crate::state::{Motion, Session};
 use crate::style::{Frame, Gauge, SOFT, duration, heat, paint};
 use crate::terminal::caps;
+use crate::time::parse_utc_millis;
 
 const FIVE_HOURS_MS: u64 = 5 * 3_600_000;
 const SEVEN_DAYS_MS: u64 = 7 * 86_400_000;
@@ -48,7 +49,12 @@ pub fn read(payload: &Payload, now: u64, session: &mut Session) -> Vec<Quota> {
                 })
                 .unwrap_or_default();
             let used = |q: &payload::Quota| q.remaining_fraction.map(|r| (1.0 - r) * 100.0);
-            let resets = |q: &payload::Quota| q.reset_in_seconds.map(|s| now + (s * 1000.0) as u64);
+            let resets = |q: &payload::Quota| {
+                q.reset_time
+                    .as_deref()
+                    .and_then(parse_utc_millis)
+                    .or_else(|| q.reset_in_seconds.map(|s| now + (s * 1000.0) as u64))
+            };
             let windows = quotas.map(|q| family_windows(q, &model)).unwrap_or_default();
             if windows.is_empty() {
                 let current = quotas.and_then(|q| pick(q, &model));
