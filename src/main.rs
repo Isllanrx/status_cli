@@ -169,7 +169,14 @@ fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
     Line {
         model: model::read(payload),
         quotas: quota::read(payload, now, session),
-        context: context::read(payload, env_number("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"), session),
+        context: context::read(
+            payload,
+            context::AutoCompact {
+                window: env_number("CLAUDE_CODE_AUTO_COMPACT_WINDOW"),
+                percent: env_number("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"),
+            },
+            session,
+        ),
         elapsed: clock::read(payload, session, now),
         columns: payload
             .terminal_width
