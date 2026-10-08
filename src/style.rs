@@ -192,7 +192,6 @@ pub fn capitalize(s: &str) -> String {
     chars.next().map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
 }
 
-#[cfg(test)]
 pub fn strip(s: &str) -> String {
     let mut in_escape = false;
     s.chars()
@@ -202,6 +201,26 @@ pub fn strip(s: &str) -> String {
             visible
         })
         .collect()
+}
+
+pub fn truncate_visible(s: &str, width: usize) -> String {
+    let mut out = String::with_capacity(s.len());
+    let (mut visible, mut in_escape) = (0, false);
+    for c in s.chars() {
+        let is_escape = in_escape || c == '\x1b';
+        in_escape = is_escape && c != 'm';
+        if !is_escape {
+            if visible == width {
+                break;
+            }
+            visible += 1;
+        }
+        out.push(c);
+    }
+    if out.contains('\x1b') {
+        out.push_str("\x1b[0m");
+    }
+    out
 }
 
 pub fn visible_width(s: &str) -> usize {
@@ -228,6 +247,14 @@ mod tests {
     #[test]
     fn visible_width_skips_escapes() {
         assert_eq!(visible_width("\x1b[1mab\x1b[0m┃"), 3);
+    }
+
+    #[test]
+    fn truncation_keeps_escapes_and_closes_the_style() {
+        let cut = truncate_visible("\x1b[1mabc\x1b[0mdef", 4);
+        assert_eq!(cut, "\x1b[1mabc\x1b[0md\x1b[0m");
+        assert_eq!(visible_width(&cut), 4);
+        assert_eq!(truncate_visible("plain", 9), "plain");
     }
 
     #[test]

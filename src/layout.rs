@@ -2,7 +2,7 @@ use crate::features::clock;
 use crate::features::context::Context;
 use crate::features::model::Model;
 use crate::features::quota::Quota;
-use crate::style::{Frame, TRACK, paint, visible_width};
+use crate::style::{Frame, TRACK, paint, truncate_visible, visible_width};
 use crate::terminal::caps;
 
 const RIGHT_MARGIN: usize = 8;
@@ -25,6 +25,9 @@ impl Line {
             if room.is_none_or(|room| visible_width(&line) <= room) {
                 break;
             }
+        }
+        if let Some(room) = room.filter(|room| visible_width(&line) > *room) {
+            line = truncate_visible(&line, room);
         }
         let pad = room.map_or(0, |room| room.saturating_sub(visible_width(&line)));
         let mut out = String::with_capacity(pad * 3 + line.len());
