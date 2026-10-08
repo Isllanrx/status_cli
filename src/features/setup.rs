@@ -4,11 +4,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
+use toml_edit::{Array, DocumentMut, Item, Table, value};
+
+const CODEX_STATUS_ITEMS: [&str; 4] = ["model-with-reasoning", "five-hour-limit", "weekly-limit", "context-used"];
+
+enum Config {
+    Json(Value),
+    CodexToml,
+}
 
 struct Host {
     name: &'static str,
     settings: PathBuf,
-    status_line: Value,
+    config: Config,
 }
 
 pub fn run() -> Vec<Result<String, String>> {
@@ -33,19 +41,24 @@ pub fn run() -> Vec<Result<String, String>> {
         .collect()
 }
 
-fn hosts(home: &Path) -> [Host; 2] {
+fn hosts(home: &Path) -> [Host; 3] {
     let command = command();
-    let claude_dir = env::var_os("CLAUDE_CONFIG_DIR").map_or_else(|| home.join(".claude"), PathBuf::from);
+    let config_dir = |var: &str, default: PathBuf| env::var_os(var).map_or(default, PathBuf::from);
     [
         Host {
             name: "Claude Code",
-            settings: claude_dir.join("settings.json"),
-            status_line: json!({ "type": "command", "command": command, "refreshInterval": 1 }),
+            settings: config_dir("CLAUDE_CONFIG_DIR", home.join(".claude")).join("settings.json"),
+            config: Config::Json(json!({ "type": "command", "command": command, "refreshInterval": 1 })),
         },
         Host {
             name: "Antigravity CLI",
             settings: home.join(".gemini").join("antigravity-cli").join("settings.json"),
-            status_line: json!({ "type": "command", "command": command, "enabled": true }),
+            config: Config::Json(json!({ "type": "command", "command": command, "enabled": true })),
+        },
+        Host {
+            name: "Codex CLI",
+            settings: config_dir("CODEX_HOME", home.join(".codex")).join("config.toml"),
+            config: Config::CodexToml,
         },
     ]
 }
@@ -71,34 +84,55 @@ fn configure(host: &Host) -> Result<Option<PathBuf>, Box<dyn Error>> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
         Err(err) => return Err(err.into()),
     };
-    let mut settings = match &existing {
-        Some(bytes) => match serde_json::from_slice(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes))? {
-            Value::Object(map) => map,
-            _ => return Err("settings file is not a JSON object".into()),
-        },
+    let text = existing.as_deref().map(|bytes| bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes));
+    let updated = match &host.config {
+        Config::Json(status_line) => merge_json(text, status_line)?,
+        Config::CodexToml => merge_codex(text.map(std::str::from_utf8).transpose()?.unwrap_or_default())?,
+    };
+    let backup = match existing {
+        Some(bytes) => {
+            let backup = with_suffix(&host.settings, ".bak-status_cli");
+            fs::write(&backup, bytes)?;
+            Some(backup)
+        }
+        None => None,
+    };
+    let staging = with_suffix(&host.settings, ".tmp-status_cli");
+    fs::write(&staging, updated)?;
+    fs::rename(&staging, &host.settings)?;
+    Ok(backup)
+}
+
+fn merge_json(existing: Option<&[u8]>, wanted: &Value) -> Result<String, Box<dyn Error>> {
+    let mut settings = match existing.map(serde_json::from_slice).transpose()? {
+        Some(Value::Object(map)) => map,
+        Some(_) => return Err("settings file is not a JSON object".into()),
         None => Map::new(),
     };
     let mut status_line = match settings.remove("statusLine") {
         Some(Value::Object(map)) => map,
         _ => Map::new(),
     };
-    if let Value::Object(wanted) = &host.status_line {
+    if let Value::Object(wanted) = wanted {
         status_line.extend(wanted.clone());
     }
     settings.insert("statusLine".to_owned(), Value::Object(status_line));
+    Ok(serde_json::to_string_pretty(&Value::Object(settings))? + "\n")
+}
 
-    let backup = match existing {
-        Some(bytes) => {
-            let backup = host.settings.with_extension("json.bak-status_cli");
-            fs::write(&backup, bytes)?;
-            Some(backup)
-        }
-        None => None,
-    };
-    let staging = host.settings.with_extension("json.tmp-status_cli");
-    fs::write(&staging, serde_json::to_string_pretty(&Value::Object(settings))? + "\n")?;
-    fs::rename(&staging, &host.settings)?;
-    Ok(backup)
+fn merge_codex(existing: &str) -> Result<String, Box<dyn Error>> {
+    let mut document: DocumentMut = existing.parse()?;
+    let tui = document.entry("tui").or_insert(Item::Table(Table::new()));
+    let tui = tui.as_table_like_mut().ok_or("[tui] in config.toml is not a table")?;
+    tui.insert("status_line", value(CODEX_STATUS_ITEMS.into_iter().collect::<Array>()));
+    tui.insert("status_line_use_colors", value(true));
+    Ok(document.to_string())
+}
+
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
 }
 
 #[cfg(test)]
@@ -110,5 +144,29 @@ mod tests {
         assert_eq!(shell_quote("/home/ana/.local/bin/status_cli"), "/home/ana/.local/bin/status_cli");
         assert_eq!(shell_quote("/Users/Ana Lu/bin/status_cli"), "'/Users/Ana Lu/bin/status_cli'");
         assert_eq!(shell_quote("/tmp/o'neil/status_cli"), r"'/tmp/o'\''neil/status_cli'");
+    }
+
+    #[test]
+    fn codex_merge_keeps_comments_and_other_settings() {
+        let before =
+            "# mine\nmodel = \"gpt\"\n\n[tui]\nscreen_reader_detection_done = true\n\n[tui.model_availability_nux]\n";
+        let after = merge_codex(before).unwrap();
+        assert!(after.starts_with("# mine\nmodel = \"gpt\"\n"));
+        assert!(after.contains("screen_reader_detection_done = true"));
+        assert!(
+            after.contains(
+                r#"status_line = ["model-with-reasoning", "five-hour-limit", "weekly-limit", "context-used"]"#
+            )
+        );
+        assert!(after.contains("status_line_use_colors = true"));
+        assert!(after.contains("[tui.model_availability_nux]"));
+        assert!(merge_codex(&after).unwrap() == after);
+    }
+
+    #[test]
+    fn codex_merge_creates_the_table_and_rejects_broken_toml() {
+        assert!(merge_codex("").unwrap().contains("[tui]"));
+        assert!(merge_codex("tui = 3").is_err());
+        assert!(merge_codex("[broken").is_err());
     }
 }

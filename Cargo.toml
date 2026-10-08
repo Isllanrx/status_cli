@@ -10,6 +10,7 @@ repository = "https://github.com/Isllanrx/status_cli"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml_edit = "0.25.16"
 
 [profile.release]
 codegen-units = 1

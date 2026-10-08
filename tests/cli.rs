@@ -322,6 +322,7 @@ fn setup(home: &std::path::Path) -> std::process::Output {
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("CODEX_HOME")
         .output()
         .unwrap()
 }
@@ -374,4 +375,20 @@ fn setup_creates_settings_for_installed_hosts_and_refuses_broken_json() {
 fn version_flag_prints_the_crate_version() {
     let out = Command::new(env!("CARGO_BIN_EXE_status_cli")).arg("--version").output().unwrap();
     assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), format!("status_cli {}", env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn setup_configures_codex_natively_without_losing_settings() {
+    let temp = TempDir::new();
+    let codex = temp.0.join(".codex");
+    fs::create_dir_all(&codex).unwrap();
+    fs::write(codex.join("config.toml"), "model = \"gpt-6\"\n\n[tui]\nscreen_reader_detection_done = true\n").unwrap();
+    let out = setup(&temp.0);
+    assert!(out.status.success());
+    assert!(String::from_utf8(out.stdout).unwrap().contains("Codex CLI: configured"));
+    let config = fs::read_to_string(codex.join("config.toml")).unwrap();
+    assert!(config.starts_with("model = \"gpt-6\""), "{config}");
+    assert!(config.contains("screen_reader_detection_done = true"));
+    assert!(config.contains("\"five-hour-limit\""));
+    assert!(codex.join("config.toml.bak-status_cli").exists());
 }
