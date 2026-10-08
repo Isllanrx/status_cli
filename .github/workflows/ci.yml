@@ -54,8 +54,10 @@ jobs:
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - if: runner.os == 'macOS'
         run: |
-          otool -l target/${{ matrix.target }}/release/status_cli | grep -E 'minos|version' | head -2
-          codesign --verify target/${{ matrix.target }}/release/status_cli
+          bin=target/${{ matrix.target }}/release/status_cli
+          otool -l "$bin" | awk '/LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX/ {found=1} found && /minos|version/ {print; exit}'
+          codesign --force --sign - "$bin"
+          codesign --verify "$bin"
       - uses: actions/upload-artifact@v4
         with:
           name: status_cli-${{ matrix.target }}
@@ -104,11 +106,11 @@ jobs:
           failed=0
           for sh in sh dash bash zsh ksh tcsh fish; do
             command -v "$sh" >/dev/null || { echo "skip $sh"; continue; }
-            out=$(COLUMNS=150 "$sh" -c 'status_cli < payload.json')
+            out=$(NO_COLOR=1 COLUMNS=150 "$sh" -c 'status_cli < payload.json')
             case "$out" in *"Opus - High"*sessão*tempo*) echo "ok $sh" ;; *) echo "FAIL $sh: $out"; failed=1 ;; esac
           done
           if command -v nu >/dev/null; then
-            out=$(nu -c 'open --raw payload.json | status_cli')
+            out=$(NO_COLOR=1 nu -c 'open --raw payload.json | status_cli')
             case "$out" in *"Opus - High"*) echo "ok nu" ;; *) echo "FAIL nu: $out"; failed=1 ;; esac
           fi
           exit $failed
@@ -131,6 +133,7 @@ jobs:
         run: |
           $env:PATH = "$PWD\bin;$env:PATH"
           $env:COLUMNS = '150'
+          $env:NO_COLOR = '1'
           $json = '{"session_id":"ci","model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"cost":{"total_duration_ms":60000}}'
           [IO.File]::WriteAllText("$PWD\payload.json", $json)
           $runs = [ordered]@{
@@ -171,7 +174,7 @@ jobs:
       - run: |
           chmod +x bin/status_cli
           printf '{"session_id":"ci","model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"cost":{"total_duration_ms":60000}}' > bin/payload.json
-          out=$(docker run --rm -e COLUMNS=150 -v "$PWD/bin:/v:ro" "${{ matrix.image }}" sh -c '/v/status_cli < /v/payload.json')
+          out=$(docker run --rm -e COLUMNS=150 -e NO_COLOR=1 -v "$PWD/bin:/v:ro" "${{ matrix.image }}" sh -c '/v/status_cli < /v/payload.json')
           echo "$out"
           case "$out" in *"Opus - High"*tempo*) ;; *) exit 1 ;; esac
 
