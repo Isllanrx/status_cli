@@ -27,23 +27,41 @@ impl Style {
         Self { underline: true, ..self }
     }
 
-    fn sgr(self, depth: Depth) -> String {
-        let mut codes = String::new();
-        for (on, code) in [(self.bold, "1"), (self.dim, "2"), (self.underline, "4")] {
+    fn write_sgr(self, out: &mut String, depth: Depth) -> bool {
+        let attributes = [(self.bold, "1"), (self.dim, "2"), (self.underline, "4")];
+        if depth == Depth::None || (self.rgb.is_none() && !attributes.iter().any(|(on, _)| *on)) {
+            return false;
+        }
+        out.push_str("\x1b[");
+        let mut separator = "";
+        for (on, code) in attributes {
             if on {
-                codes += code;
-                codes.push(';');
+                out.push_str(separator);
+                out.push_str(code);
+                separator = ";";
             }
         }
-        if let Some([r, g, b]) = self.rgb {
+        if let Some(rgb) = self.rgb {
+            out.push_str(separator);
+            let [r, g, b] = rgb;
             let _ = match depth {
-                Depth::TrueColor => write!(codes, "38;2;{r};{g};{b}"),
-                Depth::Ansi256 => write!(codes, "38;5;{}", ansi256([r, g, b])),
-                Depth::Ansi16 => write!(codes, "{}", ansi16([r, g, b])),
-                Depth::None => Ok(()),
+                Depth::TrueColor => write!(out, "38;2;{r};{g};{b}"),
+                Depth::Ansi256 => write!(out, "38;5;{}", ansi256(rgb)),
+                _ => write!(out, "{}", ansi16(rgb)),
             };
         }
-        codes.trim_end_matches(';').to_owned()
+        out.push('m');
+        true
+    }
+
+    #[cfg(test)]
+    fn sgr(self, depth: Depth) -> String {
+        let mut out = String::new();
+        if self.write_sgr(&mut out, depth) {
+            out.drain(..2);
+            out.pop();
+        }
+        out
     }
 }
 
@@ -52,10 +70,18 @@ pub const TRACK: Style = Style::rgb([60, 64, 82]);
 pub const SOFT: Style = Style::rgb([92, 97, 120]);
 pub const STRONG: Style = Style { rgb: None, bold: true, dim: false, underline: false };
 
+pub fn paint_into(out: &mut String, style: Style, text: impl Display) {
+    let styled = style.write_sgr(out, caps().depth);
+    let _ = write!(out, "{text}");
+    if styled {
+        out.push_str("\x1b[0m");
+    }
+}
+
 pub fn paint(style: Style, text: impl Display) -> String {
-    let depth = caps().depth;
-    let codes = if depth == Depth::None { String::new() } else { style.sgr(depth) };
-    if codes.is_empty() { text.to_string() } else { format!("\x1b[{codes}m{text}\x1b[0m") }
+    let mut out = String::with_capacity(32);
+    paint_into(&mut out, style, text);
+    out
 }
 
 pub fn heat(pct: f64) -> Style {
@@ -118,33 +144,36 @@ pub struct Gauge<'a> {
 impl Gauge<'_> {
     pub fn render(&self, frame: &Frame) -> String {
         let glyphs = caps().glyphs;
-        let mut out = paint(LABEL, format_args!("{} ", self.label));
+        let mut out = String::with_capacity(64 + frame.bar_width * 24);
+        paint_into(&mut out, LABEL, format_args!("{} ", self.label));
         let Some(pct) = self.pct else {
             if frame.bar_width > 0 {
                 let track: String = std::iter::repeat_n(glyphs.empty, frame.bar_width).collect();
-                out += &paint(TRACK, format_args!("{track} "));
+                paint_into(&mut out, TRACK, format_args!("{track} "));
             }
-            return out + &paint(SOFT, glyphs.missing);
+            paint_into(&mut out, SOFT, glyphs.missing);
+            return out;
         };
         if frame.bar_width > 0 {
-            out += &self.bar(pct, frame.bar_width, self.growing && frame.odd_second());
+            self.bar(&mut out, pct, frame.bar_width, self.growing && frame.odd_second());
             out.push(' ');
         }
         let flash = frame.odd_second() && (self.growing || pct >= 90.0);
         let tone = if flash { heat(pct).dim() } else { heat(pct).bold() };
-        out + &paint(tone, format_args!("{}%", pct.round()))
+        paint_into(&mut out, tone, format_args!("{}%", pct.round()));
+        out
     }
 
-    fn bar(&self, pct: f64, width: usize, flash_edge: bool) -> String {
+    fn bar(&self, out: &mut String, pct: f64, width: usize, flash_edge: bool) {
         let glyphs = caps().glyphs;
         let filled = (pct.clamp(0.0, 100.0) / 100.0 * width as f64).round() as usize;
-        (0..width)
-            .map(|i| match i < filled {
-                true if flash_edge && i + 1 == filled => paint(heat(pct).bold(), glyphs.edge),
-                true => paint(heat((i + 1) as f64 / width as f64 * 100.0), glyphs.fill),
-                false => paint(TRACK, glyphs.empty),
-            })
-            .collect()
+        for i in 0..width {
+            match i < filled {
+                true if flash_edge && i + 1 == filled => paint_into(out, heat(pct).bold(), glyphs.edge),
+                true => paint_into(out, heat((i + 1) as f64 / width as f64 * 100.0), glyphs.fill),
+                false => paint_into(out, TRACK, glyphs.empty),
+            }
+        }
     }
 }
 
@@ -163,6 +192,7 @@ pub fn capitalize(s: &str) -> String {
     chars.next().map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
 }
 
+#[cfg(test)]
 pub fn strip(s: &str) -> String {
     let mut in_escape = false;
     s.chars()
@@ -175,7 +205,14 @@ pub fn strip(s: &str) -> String {
 }
 
 pub fn visible_width(s: &str) -> usize {
-    strip(s).chars().count()
+    let mut in_escape = false;
+    s.chars()
+        .filter(|&c| {
+            let visible = !in_escape && c != '\x1b';
+            in_escape = (in_escape || c == '\x1b') && c != 'm';
+            visible
+        })
+        .count()
 }
 
 #[cfg(test)]

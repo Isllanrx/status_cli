@@ -27,7 +27,9 @@ impl Line {
             }
         }
         let pad = room.map_or(0, |room| room.saturating_sub(visible_width(&line)));
-        std::iter::repeat_n(caps().glyphs.pad, pad).chain(line.chars()).collect()
+        let mut out = String::with_capacity(pad * 3 + line.len());
+        out.extend(std::iter::repeat_n(caps().glyphs.pad, pad));
+        out + &line
     }
 
     fn compose(&self, frame: &Frame) -> String {
