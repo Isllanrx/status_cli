@@ -73,7 +73,7 @@ fn command() -> String {
     }
 }
 
-fn shell_quote(path: &str) -> String {
+pub fn shell_quote(path: &str) -> String {
     let plain = path.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'));
     if plain { path.to_owned() } else { format!("'{}'", path.replace('\'', r"'\''")) }
 }

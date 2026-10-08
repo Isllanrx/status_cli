@@ -20,7 +20,7 @@ fn codex_mode_renders_the_latest_session_with_the_same_line() {
     fs::write(day.join("rollout-2026-10-08T02-52-12-01a11a11-be89-7771-8ae8-9a9d44e87f4d.jsonl"), session.join("\n"))
         .unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_status_cli"))
-        .arg("codex")
+        .args(["codex", "--once"])
         .env("CODEX_HOME", temp.0.join("codex"))
         .env("XDG_RUNTIME_DIR", &temp.0)
         .env("NO_COLOR", "1")
@@ -37,6 +37,24 @@ fn codex_mode_renders_the_latest_session_with_the_same_line() {
 #[test]
 fn codex_mode_reports_a_missing_session() {
     let temp = TempDir::new();
-    let out = Command::new(env!("CARGO_BIN_EXE_status_cli")).arg("codex").env("CODEX_HOME", &temp.0).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_status_cli"))
+        .args(["codex", "--once"])
+        .env("CODEX_HOME", &temp.0)
+        .output()
+        .unwrap();
     assert!(String::from_utf8(out.stdout).unwrap().contains("status_cli: no Codex session found"));
+}
+
+#[test]
+fn watcher_stops_when_the_launcher_marker_is_gone() {
+    let temp = TempDir::new();
+    let started = std::time::Instant::now();
+    let out = Command::new(env!("CARGO_BIN_EXE_status_cli"))
+        .args(["codex", "--watch", "--until"])
+        .arg(temp.0.join("missing.pid"))
+        .env("CODEX_HOME", &temp.0)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
 }

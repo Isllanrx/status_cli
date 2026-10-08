@@ -3,9 +3,11 @@ use std::error::Error;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde_json::Value;
 
+use crate::features::setup::shell_quote;
 use crate::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Window};
 
 const TAIL_BYTES: u64 = 256 * 1024;
@@ -19,9 +21,11 @@ pub fn payload(now: u64) -> Result<Payload, Box<dyn Error>> {
         let body = &record["payload"];
         match (record["type"].as_str(), body["type"].as_str()) {
             (Some("turn_context"), _) if payload.model.is_none() => {
-                payload.model = body["model"]
-                    .as_str()
-                    .map(|model| Model { id: Some(model.to_owned()), display_name: Some(model.to_owned()) });
+                payload.model = body["model"].as_str().map(|model| Model {
+                    id: Some(model.to_owned()),
+                    display_name: Some(model.to_owned()),
+                    effort: None,
+                });
                 payload.effort = body["effort"].as_str().map(|level| Effort { level: level.to_owned() });
             }
             (Some("event_msg"), Some("token_count")) if payload.rate_limits.is_none() => {
@@ -50,6 +54,53 @@ pub fn payload(now: u64) -> Result<Payload, Box<dyn Error>> {
     });
     payload.cost = first_timestamp(&file).map(|started| Cost { total_duration_ms: Some(now.saturating_sub(started)) });
     Ok(payload)
+}
+
+pub fn launch(codex_args: &[String], marker: &Path) -> Result<i32, Box<dyn Error>> {
+    if let Some(dir) = marker.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(marker, std::process::id().to_string())?;
+    if let Err(err) = split_pane(&env::current_exe()?, marker) {
+        eprintln!("status_cli: {err}; run `status_cli codex --watch` in another pane");
+    }
+    let status = codex_command(codex_args).status();
+    let _ = fs::remove_file(marker);
+    Ok(status?.code().unwrap_or(1))
+}
+
+fn split_pane(exe: &Path, marker: &Path) -> Result<(), Box<dyn Error>> {
+    let status = if env::var_os("TMUX").is_some() {
+        let watcher = format!(
+            "{} codex --watch --until {}",
+            shell_quote(&exe.to_string_lossy()),
+            shell_quote(&marker.to_string_lossy())
+        );
+        Command::new("tmux").args(["split-window", "-v", "-d", "-l", "2", &watcher]).status()?
+    } else if env::var_os("WT_SESSION").is_some() {
+        Command::new("wt")
+            .args(["-w", "0", "split-pane", "-H", "-s", "0.1"])
+            .arg(exe)
+            .args(["codex", "--watch", "--until"])
+            .arg(marker)
+            .args([";", "move-focus", "up"])
+            .status()?
+    } else {
+        return Err("split panes need Windows Terminal or tmux".into());
+    };
+    if status.success() { Ok(()) } else { Err("could not open the status pane".into()) }
+}
+
+fn codex_command(args: &[String]) -> Command {
+    let mut command = if cfg!(windows) {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/d", "/c", "codex"]);
+        cmd
+    } else {
+        Command::new("codex")
+    };
+    command.args(args);
+    command
 }
 
 fn sessions_dir() -> Option<PathBuf> {

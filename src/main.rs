@@ -24,7 +24,7 @@ const PAD_CHARS: [char; 2] = ['\u{2800}', ' '];
 fn main() {
     match env::args().nth(1).as_deref() {
         Some("setup") => return run_setup(),
-        Some("codex") => return run_codex(env::args().any(|arg| arg == "--watch")),
+        Some("codex") => return run_codex(env::args().skip(2).collect()),
         Some("--version" | "-V") => return println!("status_cli {}", env!("CARGO_PKG_VERSION")),
         _ => {}
     }
@@ -70,8 +70,24 @@ fn main() {
     }
 }
 
-fn run_codex(watch: bool) {
+fn run_codex(args: Vec<String>) {
+    let flag = |name: &str| args.iter().any(|arg| arg == name);
+    let until = args.iter().position(|arg| arg == "--until").and_then(|i| args.get(i + 1)).map(PathBuf::from);
+    if !flag("--watch") && !flag("--once") {
+        let marker = cache_dir().join(format!("codex-{}.pid", std::process::id()));
+        match codex::launch(&args, &marker) {
+            Ok(code) => std::process::exit(code),
+            Err(err) => {
+                eprintln!("status_cli: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
+    let watch = flag("--watch");
     loop {
+        if until.as_deref().is_some_and(|marker| !marker.exists()) {
+            return;
+        }
         let now = now_millis();
         let line = match codex::payload(now) {
             Ok(mut payload) => {
