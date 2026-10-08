@@ -24,6 +24,7 @@ fn wraps_the_child_and_keeps_the_last_row_for_the_status_line() {
     command.env("CODEX_HOME", &temp.0);
     command.env("XDG_RUNTIME_DIR", &temp.0);
     command.env("NO_COLOR", "1");
+    command.env("STATUS_CLI_LANG", "pt");
     let mut child = pair.slave.spawn_command(command).unwrap();
     drop(pair.slave);
 
@@ -49,5 +50,5 @@ fn wraps_the_child_and_keeps_the_last_row_for_the_status_line() {
     assert!(output.contains("READY"), "{output:?}");
     assert!(cfg!(windows) || output.contains("\x1b[1;23r"), "{output:?}");
     assert!(output.contains("\x1b[24;1H"), "{output:?}");
-    assert!(output.contains("waiting for the Codex session"), "{output:?}");
+    assert!(output.contains("sessão") && output.contains("tempo"), "{output:?}");
 }

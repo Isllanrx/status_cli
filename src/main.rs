@@ -89,7 +89,7 @@ fn run_codex(args: Vec<String>) {
     let launching = !watch && !once;
     let mut reader = match env::current_dir() {
         Ok(cwd) if launching => codex::Reader::for_launch(now_millis(), cwd),
-        _ => codex::Reader::default(),
+        _ => codex::Reader::latest(),
     };
     let mut session: Option<(Option<String>, Session)> = None;
     let mut render = move |columns: Option<usize>| -> String {

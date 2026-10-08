@@ -21,7 +21,9 @@ const LAUNCH_RESCAN_MS: u64 = 1_000;
 
 #[derive(Default)]
 pub struct Reader {
+    home: Option<PathBuf>,
     launch: Option<(u64, PathBuf)>,
+    pending: Option<Payload>,
     file: Option<PathBuf>,
     scanned_at: u64,
     stamp: Option<(u64, SystemTime)>,
@@ -36,8 +38,12 @@ struct Meta {
 }
 
 impl Reader {
+    pub fn latest() -> Self {
+        Self { home: codex_home(), ..Self::default() }
+    }
+
     pub fn for_launch(since: u64, cwd: PathBuf) -> Self {
-        Self { launch: Some((since, cwd)), ..Self::default() }
+        Self { home: codex_home(), launch: Some((since, cwd)), ..Self::default() }
     }
 
     pub fn read(&mut self, now: u64) -> Result<Payload, Box<dyn Error>> {
@@ -45,15 +51,21 @@ impl Reader {
         let interval = if self.launch.is_some() { LAUNCH_RESCAN_MS } else { RESCAN_MS };
         let due = self.scanned_at == 0 || now.saturating_sub(self.scanned_at) >= interval;
         if due && (missing || self.launch.is_none()) {
-            let sessions = sessions_dir().ok_or("Codex home directory not found")?;
+            let sessions = self.home.as_deref().ok_or("Codex home directory not found")?.join("sessions");
             self.file = match &self.launch {
                 Some((since, cwd)) => launched_session(&sessions, *since, cwd),
                 None => latest_session(&sessions),
             };
             self.scanned_at = now;
         }
-        let missing = if self.launch.is_some() { "waiting for the Codex session" } else { "no Codex session found" };
-        let file = self.file.as_deref().ok_or(missing)?;
+        let Some(file) = self.file.as_deref() else {
+            let (Some((since, _)), Some(home)) = (&self.launch, &self.home) else {
+                return Err("no Codex session found".into());
+            };
+            let mut payload = self.pending.get_or_insert_with(|| before_first_message(home)).clone();
+            payload.cost = Some(Cost { total_duration_ms: Some(now.saturating_sub(*since)) });
+            return Ok(payload);
+        };
         let metadata = fs::metadata(file)?;
         let stamp = Some((metadata.len(), metadata.modified()?));
         if self.stamp != stamp || self.parsed.is_none() {
@@ -63,7 +75,7 @@ impl Reader {
             self.parsed = Some((payload, meta.and_then(|meta| meta.started)));
             self.stamp = stamp;
         }
-        let (payload, started) = self.parsed.as_ref().ok_or(missing)?;
+        let (payload, started) = self.parsed.as_ref().ok_or("no Codex session found")?;
         let mut payload = payload.clone();
         payload.cost = started.map(|started| Cost { total_duration_ms: Some(now.saturating_sub(started)) });
         Ok(payload)
@@ -142,12 +154,29 @@ pub fn command(args: &[String]) -> (String, Vec<String>) {
     }
 }
 
-fn sessions_dir() -> Option<PathBuf> {
-    let home = env::var_os("CODEX_HOME").map(PathBuf::from).or_else(|| {
+fn codex_home() -> Option<PathBuf> {
+    env::var_os("CODEX_HOME").map(PathBuf::from).or_else(|| {
         let user = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
         Some(PathBuf::from(user).join(".codex"))
-    })?;
-    Some(home.join("sessions"))
+    })
+}
+
+fn configured_model(home: &Path) -> Option<(String, Option<String>)> {
+    let config: toml_edit::DocumentMut = fs::read_to_string(home.join("config.toml")).ok()?.parse().ok()?;
+    let model = config.get("model")?.as_str()?.to_owned();
+    Some((model, config.get("model_reasoning_effort").and_then(|e| e.as_str()).map(str::to_owned)))
+}
+
+fn before_first_message(home: &Path) -> Payload {
+    let mut payload = latest_session(&home.join("sessions"))
+        .and_then(|file| parse_session(&file).ok())
+        .unwrap_or_else(|| Payload { product: Some("codex".to_owned()), ..Payload::default() });
+    payload.context_window = None;
+    if let Some((model, effort)) = configured_model(home) {
+        payload.model = Some(Model { id: Some(model.clone()), display_name: Some(model), effort: None });
+        payload.effort = effort.map(|level| Effort { level });
+    }
+    payload
 }
 
 fn newest_children(dir: &Path, count: usize) -> Vec<PathBuf> {
@@ -243,6 +272,25 @@ fn window(value: &Value) -> Option<Window> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_shows_the_configured_model_and_account_limits_before_the_first_message() {
+        let home = std::env::temp_dir().join(format!("status_cli-codex-pending-{}", std::process::id()));
+        let day = home.join("sessions").join("2026").join("10").join("07");
+        fs::create_dir_all(&day).unwrap();
+        fs::write(home.join("config.toml"), "model = \"gpt-6-luna\"\nmodel_reasoning_effort = \"high\"\n").unwrap();
+        let previous = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":100,"last_token_usage":{"total_tokens":90}},"rate_limits":{"primary":{"used_percent":12.0,"window_minutes":300}}}}"#;
+        fs::write(day.join("rollout-old.jsonl"), previous).unwrap();
+        let since = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64 + 3_600_000;
+        let mut reader = Reader { home: Some(home.clone()), launch: Some((since, home.clone())), ..Reader::default() };
+        let payload = reader.read(since + 61_000).unwrap();
+        assert_eq!(payload.model.and_then(|m| m.display_name).as_deref(), Some("gpt-6-luna"));
+        assert_eq!(payload.effort.map(|e| e.level).as_deref(), Some("high"));
+        assert_eq!(payload.rate_limits.and_then(|l| l.five_hour).and_then(|w| w.used_percentage), Some(12.0));
+        assert!(payload.context_window.is_none());
+        assert_eq!(payload.cost.and_then(|c| c.total_duration_ms), Some(61_000));
+        fs::remove_dir_all(&home).unwrap();
+    }
 
     #[test]
     fn windows_are_labelled_by_their_length() {
