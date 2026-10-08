@@ -8,6 +8,8 @@ use crate::terminal::caps;
 const FIVE_HOURS_MS: u64 = 5 * 3_600_000;
 const SEVEN_DAYS_MS: u64 = 7 * 86_400_000;
 const MIN_ELAPSED_FOR_PROJECTION_MS: u64 = 10 * 60_000;
+const MIN_PCT_FOR_PROJECTION: f64 = 50.0;
+const PROJECTION_MARGIN: f64 = 0.8;
 
 pub struct Quota {
     label: &'static str,
@@ -64,11 +66,11 @@ impl Quota {
         let (pct, resets_at, window) = (self.motion.as_ref()?.shown, self.resets_at?, self.window?);
         let left = resets_at.saturating_sub(now);
         let elapsed = window.saturating_sub(left);
-        if elapsed < MIN_ELAPSED_FOR_PROJECTION_MS || pct <= 0.0 || pct >= 100.0 {
+        if elapsed < MIN_ELAPSED_FOR_PROJECTION_MS || !(MIN_PCT_FOR_PROJECTION..100.0).contains(&pct) {
             return None;
         }
         let to_full = ((100.0 - pct) * elapsed as f64 / pct) as u64;
-        (to_full < left).then_some(to_full)
+        ((to_full as f64) < left as f64 * PROJECTION_MARGIN).then_some(to_full)
     }
 
     pub fn render(&self, frame: &Frame) -> String {
@@ -106,7 +108,7 @@ mod tests {
     fn claude_shows_both_windows_with_session_reset() {
         let json = r#"{"rate_limits":{"five_hour":{"used_percentage":72,"resets_at":6400},
                        "seven_day":{"used_percentage":31,"resets_at":9000}}}"#;
-        assert_eq!(lines(json, false), ["sessão 72% ↻ 1h30m ⇥ 1h21m", "semana 31%"]);
+        assert_eq!(lines(json, false), ["sessão 72% ↻ 1h30m", "semana 31%"]);
         assert_eq!(lines(json, true), ["sessão 72%", "semana 31%"]);
     }
 
@@ -127,6 +129,19 @@ mod tests {
         assert_eq!(quota(80.0, 180).runs_out_in(0), Some(30 * 60_000));
         assert_eq!(quota(30.0, 180).runs_out_in(0), None);
         assert_eq!(quota(80.0, 295).runs_out_in(0), None);
+    }
+
+    #[test]
+    fn early_window_usage_does_not_duplicate_the_reset() {
+        let quota = |pct: f64, left_min: u64| Quota {
+            label: "x",
+            motion: Some(Motion { shown: pct, growing: false }),
+            resets_at: Some(left_min * 60_000),
+            window: Some(FIVE_HOURS_MS),
+            show_reset: false,
+        };
+        assert_eq!(quota(4.0, 288).runs_out_in(0), None);
+        assert_eq!(quota(55.0, 100).runs_out_in(0), None);
     }
 
     #[test]
