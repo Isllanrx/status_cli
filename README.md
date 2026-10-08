@@ -66,7 +66,9 @@ To install by hand, download your platform's binary from the
 ## Hosts
 
 **Claude Code** runs `status_cli` from `statusLine` in `~/.claude/settings.json` (or `CLAUDE_CONFIG_DIR`) every
-second.
+second, through Git Bash or PowerShell on Windows. A `statusLine` in a project's `.claude/settings.json` takes
+precedence over it. Outside fullscreen mode Claude Code shows notifications on the right of the same row, where they
+can cover the end of the line. `subagentStatusLine` uses a different contract and is not supported.
 
 **agy** runs it from `statusLine` in `~/.gemini/antigravity-cli/settings.json`. agy only refreshes the line when
 the agent changes state, so the clock moves with activity rather than every second; it counts from the first entry
@@ -109,8 +111,10 @@ Model names and effort levels come straight from the host, so new models need no
 those of the current model's family (`gemini-5h` and `gemini-weekly` for Gemini, `3p-…` for third-party models).
 Usage limits only exist on subscription plans and appear after the first reply; until then a segment shows `–`.
 
-Claude Code does not publish its auto-compact threshold. The estimate here is the context window minus 33k tokens,
-about 83.5% of 200k; `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` can only lower it.
+Claude Code does not send its auto-compact threshold, so `compactar` estimates it the way the documentation
+describes it: the auto-compact window minus 33k tokens (about 967k on a 1M window). The window is the model's
+context unless `CLAUDE_CODE_AUTO_COMPACT_WINDOW` sets a smaller one, and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` can only
+bring the threshold down. Values set through `autoCompactWindow` in settings are not read.
 
 ## Languages
 
