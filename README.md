@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.png" alt="status_cli icon" width="160">
+</p>
+
 # status_cli
 
 [![CI](https://github.com/Isllanrx/status_cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Isllanrx/status_cli/actions/workflows/ci.yml)
@@ -9,7 +13,7 @@ A status line for [Claude Code](https://code.claude.com/docs/en/statusline) and 
 limits you have spent, how close the conversation is to auto-compact and how long the session has been running,
 right-aligned at the bottom of the terminal.
 
-![status_cli in a terminal: model and effort, session and weekly usage bars, auto-compact progress and session clock](interface.png)
+![status_cli in a terminal: model and effort, session and weekly usage bars, auto-compact progress and session clock](assets/interface.png)
 
 A single static binary written in Rust. It needs no runtime, makes no network calls and finishes in under a
 millisecond of its own work.
