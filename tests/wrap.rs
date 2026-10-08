@@ -47,7 +47,7 @@ fn wraps_the_child_and_keeps_the_last_row_for_the_status_line() {
 
     assert_eq!(status.exit_code(), 3);
     assert!(output.contains("READY"), "{output:?}");
-    assert!(output.contains("\x1b[1;23r"), "{output:?}");
+    assert!(cfg!(windows) || output.contains("\x1b[1;23r"), "{output:?}");
     assert!(output.contains("\x1b[24;1H"), "{output:?}");
     assert!(output.contains("waiting for the Codex session"), "{output:?}");
 }

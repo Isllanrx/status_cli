@@ -58,6 +58,7 @@ pub fn run_with(temp: &TempDir, input: &str, columns: Option<usize>, vars: &[(&s
         .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
         .env("XDG_RUNTIME_DIR", &temp.0)
         .env_remove("STATUS_CLI_LOG")
+        .env("STATUS_CLI_LANG", "pt")
         .env_remove("STATUS_CLI_COLOR")
         .env_remove("STATUS_CLI_ASCII")
         .env_remove("NO_COLOR")

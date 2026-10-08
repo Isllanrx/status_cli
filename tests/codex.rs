@@ -22,6 +22,7 @@ fn codex_mode_renders_the_latest_session_with_the_same_line() {
     let out = Command::new(env!("CARGO_BIN_EXE_status_cli"))
         .args(["codex", "--once"])
         .env("CODEX_HOME", temp.0.join("codex"))
+        .env("STATUS_CLI_LANG", "pt")
         .env("XDG_RUNTIME_DIR", &temp.0)
         .env("NO_COLOR", "1")
         .output()
