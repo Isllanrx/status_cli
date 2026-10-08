@@ -51,15 +51,19 @@ openSUSE, Rocky and Amazon Linux containers.
 
 | | Linux (static) | Windows |
 | --- | --- | --- |
-| Spawn to exit | 0.65 ms | ~6 ms (process creation) |
-| Work inside the binary | ~0.1 ms | ~0.2 ms |
+| Spawn to exit | 0.62 ms | 5.5 ms, almost all OS process creation |
+| Work inside the binary | 0.08 ms | 0.18 ms |
 
-State is one small file per session (`status_cli-<id>` in `XDG_RUNTIME_DIR` or the temp dir), read once per
-refresh, rewritten only on change and pruned after 7 days.
+The remaining internal cost is I/O the OS imposes: reading stdin on Linux and opening the state file on Windows,
+where the file system filter dominates. State is one small file per session in `status_cli/` under
+`XDG_RUNTIME_DIR`, `%LOCALAPPDATA%`, `XDG_CACHE_HOME` or `~/.cache`, read once per refresh, rewritten only on change
+and pruned after 7 days.
 
 ## Observability
 
-`STATUS_CLI_LOG=<file>` appends one JSON line per run (`ts`, `us`, `host`, `session`, `error`), rotating at 1 MiB.
+`STATUS_CLI_LOG=<file>` appends one JSON line per run with the total time and its breakdown (`stdin`, `parse`,
+`state_load`, `features`, `render`, `state_save`, `stdout`, in microseconds), plus `host`, `session` and `error`,
+rotating at 1 MiB.
 Errors also show on the line as `status_cli: <error>`; the process always exits 0.
 
 ## Development
