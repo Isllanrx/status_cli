@@ -84,9 +84,16 @@ ksh, tcsh, fish and nushell on Windows, Linux and macOS (x64 and ARM), and insid
 Alpine, openSUSE, Rocky and Amazon Linux containers. The Linux binary is statically linked, so it runs on any
 distribution.
 
-Codex CLI cannot run external status line commands, so `status_cli setup` configures its native status line
-instead: model with reasoning effort, 5-hour and weekly limits and context used, in `~/.codex/config.toml`
-(or `CODEX_HOME`), keeping comments and every other setting.
+Codex CLI cannot run external status line commands. `status_cli setup` configures its native status line instead
+(model with reasoning, both limits and context used in `~/.codex/config.toml` or `CODEX_HOME`, keeping comments
+and every other setting). For the same line as Claude Code, run it next to Codex in a split pane:
+
+```sh
+status_cli codex --watch
+```
+
+It reads the latest session in `~/.codex/sessions` and redraws every second; without `--watch` it prints once,
+which suits tmux status bars and shell prompts.
 
 ## Performance
 
