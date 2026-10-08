@@ -74,6 +74,71 @@ fn link(exe: &Path, alias: &Path) -> std::io::Result<()> {
     fs::hard_link(exe, alias).or_else(|_| fs::copy(exe, alias).map(drop))
 }
 
+pub fn doctor() -> (Vec<String>, bool) {
+    let exe = env::current_exe().ok();
+    let mut lines = vec![format!(
+        "status_cli {} at {}",
+        env!("CARGO_PKG_VERSION"),
+        exe.as_deref().map_or_else(|| "?".to_owned(), |exe| exe.display().to_string())
+    )];
+    let mut healthy = true;
+    let binary = format!("status_cli{}", env::consts::EXE_SUFFIX);
+    let on_path =
+        env::var_os("PATH").is_some_and(|path| env::split_paths(&path).any(|dir| dir.join(&binary).is_file()));
+    match (on_path, cfg!(windows)) {
+        (true, _) => lines.push("ok      status_cli is on PATH".to_owned()),
+        (false, true) => {
+            healthy = false;
+            lines.push("missing status_cli is not on PATH; rerun the installer".to_owned());
+        }
+        (false, false) => lines.push("info    status_cli is not on PATH; hosts use its full path".to_owned()),
+    }
+    let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")).map(PathBuf::from) else {
+        lines.push("missing home directory not found".to_owned());
+        return (lines, false);
+    };
+    let mut configured = 0;
+    for host in hosts(&home) {
+        let marker = match host.config {
+            Config::Json(_) => "status_cli",
+            Config::CodexToml => "status_line",
+        };
+        let installed = host.settings.parent().is_some_and(Path::is_dir);
+        let ready = fs::read_to_string(&host.settings).is_ok_and(|text| text.contains(marker));
+        lines.push(match (installed, ready) {
+            (false, _) => format!("skip    {} is not installed", host.name),
+            (true, true) => {
+                configured += 1;
+                format!("ok      {} -> {}", host.name, host.settings.display())
+            }
+            (true, false) => {
+                healthy = false;
+                format!("missing {} is not configured; run status_cli setup", host.name)
+            }
+        });
+    }
+    if configured == 0 {
+        healthy = false;
+        lines.push(
+            "missing no host is configured; install Claude Code, agy or Codex and run status_cli setup".to_owned(),
+        );
+    }
+    let alias = exe.map(|exe| exe.with_file_name(format!("{CODEX_ALIAS}{}", env::consts::EXE_SUFFIX)));
+    lines.push(if alias.as_deref().is_some_and(Path::exists) {
+        format!("ok      {CODEX_ALIAS} shortcut is installed")
+    } else {
+        format!("info    {CODEX_ALIAS} shortcut is missing; run status_cli setup")
+    });
+    let caps = crate::terminal::caps();
+    lines.push(format!(
+        "info    terminal: {:?} colors, {} glyphs, language {}",
+        caps.depth,
+        if caps.glyphs.pad == ' ' { "ASCII" } else { "Unicode" },
+        crate::i18n::labels().code
+    ));
+    (lines, healthy)
+}
+
 fn hosts(home: &Path) -> [Host; 3] {
     let command = command();
     let config_dir = |var: &str, default: PathBuf| env::var_os(var).map_or(default, PathBuf::from);
