@@ -342,7 +342,13 @@ fn setup_merges_existing_settings_and_skips_missing_hosts() {
     let settings: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(claude.join("settings.json")).unwrap()).unwrap();
     assert_eq!(settings["model"], "opus");
-    assert_eq!(settings["statusLine"]["command"], "status_cli");
+    let command = settings["statusLine"]["command"].as_str().unwrap();
+    if cfg!(windows) {
+        assert_eq!(command, "status_cli");
+    } else {
+        let exe = std::path::Path::new(env!("CARGO_BIN_EXE_status_cli")).canonicalize().unwrap();
+        assert_eq!(command.trim_matches('\''), exe.to_str().unwrap());
+    }
     assert_eq!(settings["statusLine"]["padding"], 2);
     assert_eq!(settings["statusLine"]["refreshInterval"], 1);
     assert!(claude.join("settings.json.bak-status_cli").exists());

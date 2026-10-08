@@ -5,8 +5,6 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
-const COMMAND: &str = "status_cli";
-
 struct Host {
     name: &'static str,
     settings: PathBuf,
@@ -36,19 +34,35 @@ pub fn run() -> Vec<Result<String, String>> {
 }
 
 fn hosts(home: &Path) -> [Host; 2] {
+    let command = command();
     let claude_dir = env::var_os("CLAUDE_CONFIG_DIR").map_or_else(|| home.join(".claude"), PathBuf::from);
     [
         Host {
             name: "Claude Code",
             settings: claude_dir.join("settings.json"),
-            status_line: json!({ "type": "command", "command": COMMAND, "refreshInterval": 1 }),
+            status_line: json!({ "type": "command", "command": command, "refreshInterval": 1 }),
         },
         Host {
             name: "Antigravity CLI",
             settings: home.join(".gemini").join("antigravity-cli").join("settings.json"),
-            status_line: json!({ "type": "command", "command": COMMAND, "enabled": true }),
+            status_line: json!({ "type": "command", "command": command, "enabled": true }),
         },
     ]
+}
+
+fn command() -> String {
+    if cfg!(windows) {
+        return "status_cli".to_owned();
+    }
+    match env::current_exe().and_then(|exe| exe.canonicalize()) {
+        Ok(exe) => shell_quote(&exe.to_string_lossy()),
+        Err(_) => "status_cli".to_owned(),
+    }
+}
+
+fn shell_quote(path: &str) -> String {
+    let plain = path.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'));
+    if plain { path.to_owned() } else { format!("'{}'", path.replace('\'', r"'\''")) }
 }
 
 fn configure(host: &Host) -> Result<Option<PathBuf>, Box<dyn Error>> {
@@ -85,4 +99,16 @@ fn configure(host: &Host) -> Result<Option<PathBuf>, Box<dyn Error>> {
     fs::write(&staging, serde_json::to_string_pretty(&Value::Object(settings))? + "\n")?;
     fs::rename(&staging, &host.settings)?;
     Ok(backup)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quotes_paths_only_when_a_shell_would_split_them() {
+        assert_eq!(shell_quote("/home/ana/.local/bin/status_cli"), "/home/ana/.local/bin/status_cli");
+        assert_eq!(shell_quote("/Users/Ana Lu/bin/status_cli"), "'/Users/Ana Lu/bin/status_cli'");
+        assert_eq!(shell_quote("/tmp/o'neil/status_cli"), r"'/tmp/o'\''neil/status_cli'");
+    }
 }

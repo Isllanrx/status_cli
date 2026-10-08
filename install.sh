@@ -60,7 +60,7 @@ echo "Installed $("$bin_dir/status_cli" --version) to $bin_dir"
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *)
-    echo "Add $bin_dir to PATH so hosts can find it, for example:"
+    echo "Hosts call status_cli by its full path. To run it yourself, add $bin_dir to PATH:"
     echo "  echo 'export PATH=\"$bin_dir:\$PATH\"' >> ~/.profile"
     ;;
 esac
