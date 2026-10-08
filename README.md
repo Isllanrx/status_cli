@@ -71,6 +71,7 @@ Everything works out of the box. These environment variables change the defaults
 | `STATUS_CLI_ASCII` | Use ASCII instead of Unicode glyphs |
 | `NO_COLOR` | Disable colors |
 | `STATUS_CLI_LOG` | Path of a JSON Lines log with timings per phase, model, effort and the rendered line |
+| `STATUS_CLI_CODEX` | Program to run instead of `codex` in `status_cli codex` |
 
 ## Compatibility
 
@@ -84,16 +85,20 @@ ksh, tcsh, fish and nushell on Windows, Linux and macOS (x64 and ARM), and insid
 Alpine, openSUSE, Rocky and Amazon Linux containers. The Linux binary is statically linked, so it runs on any
 distribution.
 
-Codex CLI cannot run external status line commands. `status_cli setup` configures its native status line instead
-(model with reasoning, both limits and context used in `~/.codex/config.toml` or `CODEX_HOME`, keeping comments
-and every other setting). For the same line as Claude Code, run it next to Codex in a split pane:
+Codex CLI cannot run external status line commands, so status_cli runs Codex itself:
 
 ```sh
-status_cli codex --watch
+status_cli codex
 ```
 
-It reads the latest session in `~/.codex/sessions` and redraws every second; without `--watch` it prints once,
-which suits tmux status bars and shell prompts.
+Codex starts in a pseudo-terminal one row shorter than the window (ConPTY on Windows, openpty elsewhere) and the
+status line is drawn on the last row of the same terminal. Keys, mouse, paste and resizes pass straight through,
+and Codex's scroll regions are clamped so they never reach the status row. Any arguments are forwarded to `codex`,
+and its exit code is returned. Data comes from the newest session in `~/.codex/sessions`, read again only when the
+file changes. `status_cli codex --once` prints the line once, for tmux status bars or shell prompts.
+
+`status_cli setup` also configures Codex's native status line in `~/.codex/config.toml` (or `CODEX_HOME`), keeping
+comments and every other setting, for when Codex is started directly.
 
 ## Performance
 
