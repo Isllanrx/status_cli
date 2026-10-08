@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use features::telemetry::{self, Event, Timer};
-use features::{clock, context, model, quota};
+use features::{clock, context, model, quota, setup};
 use layout::Line;
 use payload::Payload;
 use state::Session;
@@ -21,6 +21,11 @@ const MAX_INPUT_BYTES: u64 = 1 << 20;
 const PAD_CHARS: [char; 2] = ['\u{2800}', ' '];
 
 fn main() {
+    match env::args().nth(1).as_deref() {
+        Some("setup") => return run_setup(),
+        Some("--version" | "-V") => return println!("status_cli {}", env!("CARGO_PKG_VERSION")),
+        _ => {}
+    }
     let mut timer = Timer::start();
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     let payload = read_input().and_then(|input| {
@@ -60,6 +65,22 @@ fn main() {
             error,
         };
         telemetry::record(path.as_ref(), event, &timer);
+    }
+}
+
+fn run_setup() {
+    let mut failed = false;
+    for outcome in setup::run() {
+        match outcome {
+            Ok(message) => println!("{message}"),
+            Err(message) => {
+                eprintln!("{message}");
+                failed = true;
+            }
+        }
+    }
+    if failed {
+        std::process::exit(1);
     }
 }
 
