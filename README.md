@@ -34,8 +34,8 @@ irm https://raw.githubusercontent.com/Isllanrx/status_cli/main/install.ps1 | iex
 
 The installer picks the binary for your system, checks its SHA-256 against the release, places it in
 `~/.local/bin` and runs `status_cli setup`. On Windows it also adds that folder to `PATH`; on Linux and macOS
-setup writes the binary's full path into the host settings, so it works whatever your `PATH` is. Setup adds the `statusLine` entry to
-the settings of every host it finds and keeps a `.bak-status_cli` copy of the previous file. Open a new session
+setup writes the binary's full path into the host settings, so it works whatever your `PATH` is. Setup configures Claude Code, agy and
+Codex CLI, whichever are installed, and keeps a `.bak-status_cli` copy of the previous file. Open a new session
 afterwards.
 
 To install by hand, download the binary for your platform from the
@@ -84,12 +84,9 @@ ksh, tcsh, fish and nushell on Windows, Linux and macOS (x64 and ARM), and insid
 Alpine, openSUSE, Rocky and Amazon Linux containers. The Linux binary is statically linked, so it runs on any
 distribution.
 
-Codex CLI cannot run external status line commands. The closest built-in setup goes in `~/.codex/config.toml`:
-
-```toml
-[tui]
-status_line = ["model-with-reasoning", "five-hour-limit", "weekly-limit", "context-used"]
-```
+Codex CLI cannot run external status line commands, so `status_cli setup` configures its native status line
+instead: model with reasoning effort, 5-hour and weekly limits and context used, in `~/.codex/config.toml`
+(or `CODEX_HOME`), keeping comments and every other setting.
 
 ## Performance
 
