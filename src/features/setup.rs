@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value, json};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
+pub const CODEX_ALIAS: &str = "codex-stt";
 const CODEX_STATUS_ITEMS: [&str; 4] = ["model-with-reasoning", "five-hour-limit", "weekly-limit", "context-used"];
 
 enum Config {
@@ -23,7 +24,7 @@ pub fn run() -> Vec<Result<String, String>> {
     let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")).map(PathBuf::from) else {
         return vec![Err("home directory not found; nothing configured".to_owned())];
     };
-    hosts(&home)
+    let mut outcomes: Vec<Result<String, String>> = hosts(&home)
         .into_iter()
         .map(|host| {
             let outcome = match host.settings.parent() {
@@ -38,7 +39,39 @@ pub fn run() -> Vec<Result<String, String>> {
                 Err(err) => Err(format!("{}: not changed, {err} -> {}", host.name, host.settings.display())),
             }
         })
-        .collect()
+        .collect();
+    outcomes.push(Ok(link_codex_alias()));
+    outcomes
+}
+
+fn link_codex_alias() -> String {
+    let linked = env::current_exe().and_then(|exe| {
+        let alias = exe.with_file_name(format!("{CODEX_ALIAS}{}", env::consts::EXE_SUFFIX));
+        if alias == exe {
+            return Ok(alias);
+        }
+        if fs::symlink_metadata(&alias).is_ok() && fs::remove_file(&alias).is_err() {
+            let stale = with_suffix(&alias, ".old");
+            let _ = fs::remove_file(&stale);
+            fs::rename(&alias, &stale)?;
+        }
+        link(&exe, &alias)?;
+        Ok(alias)
+    });
+    match linked {
+        Ok(alias) => format!("{CODEX_ALIAS}: ready -> {}", alias.display()),
+        Err(err) => format!("{CODEX_ALIAS}: not created ({err}); use `status_cli codex` instead"),
+    }
+}
+
+#[cfg(unix)]
+fn link(exe: &Path, alias: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(exe, alias)
+}
+
+#[cfg(windows)]
+fn link(exe: &Path, alias: &Path) -> std::io::Result<()> {
+    fs::hard_link(exe, alias).or_else(|_| fs::copy(exe, alias).map(drop))
 }
 
 fn hosts(home: &Path) -> [Host; 3] {

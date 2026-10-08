@@ -244,6 +244,7 @@ jobs:
           export HOME="$RUNNER_TEMP/home with space" && mkdir -p "$HOME/.claude"
           sh install.sh
           "$HOME/.local/bin/status_cli" --version | grep -q "${TAG#v}"
+          "$HOME/.local/bin/codex-stt" --once | grep -q "status_cli:"
           command=$(python3 -c 'import json, os; print(json.load(open(os.path.expanduser("~/.claude/settings.json")))["statusLine"]["command"])')
           echo "configured command: $command"
           printf '{"session_id":"ci","model":{"display_name":"Opus 5.5"},"cost":{"total_duration_ms":60000}}' > payload.json
@@ -265,4 +266,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           $version = & (Join-Path $env:STATUS_CLI_INSTALL_DIR 'status_cli.exe') --version
           if ($version -notmatch [regex]::Escape($env:TAG.TrimStart('v'))) { exit 1 }
+          $shortcut = & (Join-Path $env:STATUS_CLI_INSTALL_DIR 'codex-stt.exe') --once
+          if ($shortcut -notmatch 'status_cli:') { exit 1 }
           if (-not (Select-String -Path (Join-Path $env:USERPROFILE '.claude\settings.json') -Pattern '"command": "status_cli"' -Quiet)) { exit 1 }

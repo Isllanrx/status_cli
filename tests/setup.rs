@@ -4,7 +4,10 @@ use common::*;
 use std::fs;
 use std::process::Command;
 
+static SETUP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn setup(home: &std::path::Path) -> std::process::Output {
+    let _serial = SETUP.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     Command::new(env!("CARGO_BIN_EXE_status_cli"))
         .arg("setup")
         .env("HOME", home)
@@ -79,4 +82,15 @@ fn setup_configures_codex_natively_without_losing_settings() {
     assert!(config.contains("screen_reader_detection_done = true"));
     assert!(config.contains("\"five-hour-limit\""));
     assert!(codex.join("config.toml.bak-status_cli").exists());
+}
+
+#[test]
+fn setup_creates_the_codex_stt_shortcut_next_to_the_binary() {
+    let temp = TempDir::new();
+    let out = setup(&temp.0);
+    assert!(String::from_utf8(out.stdout).unwrap().contains("codex-stt: ready"));
+    let alias = std::path::Path::new(env!("CARGO_BIN_EXE_status_cli"))
+        .with_file_name(format!("codex-stt{}", std::env::consts::EXE_SUFFIX));
+    let output = Command::new(&alias).arg("--once").env("CODEX_HOME", &temp.0).output().unwrap();
+    assert!(String::from_utf8(output.stdout).unwrap().contains("status_cli: no Codex session found"));
 }

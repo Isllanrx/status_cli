@@ -4,6 +4,7 @@ mod payload;
 mod state;
 mod style;
 mod terminal;
+mod time;
 
 use std::env;
 use std::error::Error;
@@ -22,6 +23,12 @@ const MAX_INPUT_BYTES: u64 = 1 << 20;
 const PAD_CHARS: [char; 2] = ['\u{2800}', ' '];
 
 fn main() {
+    let invoked_as = env::args_os()
+        .next()
+        .and_then(|arg| PathBuf::from(arg).file_stem().map(|stem| stem.to_string_lossy().to_ascii_lowercase()));
+    if invoked_as.as_deref() == Some(setup::CODEX_ALIAS) {
+        return run_codex(env::args().skip(1).collect());
+    }
     match env::args().nth(1).as_deref() {
         Some("setup") => return run_setup(),
         Some("codex") => return run_codex(env::args().skip(2).collect()),
@@ -73,7 +80,11 @@ fn main() {
 fn run_codex(args: Vec<String>) {
     let flag = |name: &str| args.iter().any(|arg| arg == name);
     let (watch, once) = (flag("--watch"), flag("--once"));
-    let mut reader = codex::Reader::default();
+    let launching = !watch && !once;
+    let mut reader = match env::current_dir() {
+        Ok(cwd) if launching => codex::Reader::for_launch(now_millis(), cwd),
+        _ => codex::Reader::default(),
+    };
     let mut session: Option<(Option<String>, Session)> = None;
     let mut render = move |columns: Option<usize>| -> String {
         let now = now_millis();
