@@ -3,12 +3,10 @@ use std::error::Error;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::SystemTime;
 
 use serde_json::Value;
 
-use crate::features::setup::shell_quote;
 use crate::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Window};
 
 const TAIL_BYTES: u64 = 256 * 1024;
@@ -83,51 +81,17 @@ fn parse_session(file: &Path) -> Result<Payload, Box<dyn Error>> {
     Ok(payload)
 }
 
-pub fn launch(codex_args: &[String], marker: &Path) -> Result<i32, Box<dyn Error>> {
-    if let Some(dir) = marker.parent() {
-        fs::create_dir_all(dir)?;
+pub fn command(args: &[String]) -> (String, Vec<String>) {
+    if let Ok(program) = env::var("STATUS_CLI_CODEX") {
+        return (program, args.to_vec());
     }
-    fs::write(marker, std::process::id().to_string())?;
-    if let Err(err) = split_pane(&env::current_exe()?, marker) {
-        eprintln!("status_cli: {err}; run `status_cli codex --watch` in another pane");
+    if cfg!(windows) {
+        let mut wrapped = vec!["/d".to_owned(), "/c".to_owned(), "codex".to_owned()];
+        wrapped.extend_from_slice(args);
+        ("cmd".to_owned(), wrapped)
+    } else {
+        ("codex".to_owned(), args.to_vec())
     }
-    let status = codex_command(codex_args).status();
-    let _ = fs::remove_file(marker);
-    Ok(status?.code().unwrap_or(1))
-}
-
-fn split_pane(exe: &Path, marker: &Path) -> Result<(), Box<dyn Error>> {
-    let status = if env::var_os("TMUX").is_some() {
-        let watcher = format!(
-            "{} codex --watch --until {}",
-            shell_quote(&exe.to_string_lossy()),
-            shell_quote(&marker.to_string_lossy())
-        );
-        Command::new("tmux").args(["split-window", "-v", "-d", "-l", "2", &watcher]).status()?
-    } else if env::var_os("WT_SESSION").is_some() {
-        Command::new("wt")
-            .args(["-w", "0", "split-pane", "-H", "-s", "0.1"])
-            .arg(exe)
-            .args(["codex", "--watch", "--until"])
-            .arg(marker)
-            .args([";", "move-focus", "up"])
-            .status()?
-    } else {
-        return Err("split panes need Windows Terminal or tmux".into());
-    };
-    if status.success() { Ok(()) } else { Err("could not open the status pane".into()) }
-}
-
-fn codex_command(args: &[String]) -> Command {
-    let mut command = if cfg!(windows) {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/d", "/c", "codex"]);
-        cmd
-    } else {
-        Command::new("codex")
-    };
-    command.args(args);
-    command
 }
 
 fn sessions_dir() -> Option<PathBuf> {

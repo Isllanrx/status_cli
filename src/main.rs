@@ -13,7 +13,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use features::telemetry::{self, Event, Timer};
-use features::{clock, codex, context, model, quota, setup};
+use features::{clock, codex, context, model, quota, setup, wrap};
 use layout::Line;
 use payload::Payload;
 use state::Session;
@@ -72,50 +72,49 @@ fn main() {
 
 fn run_codex(args: Vec<String>) {
     let flag = |name: &str| args.iter().any(|arg| arg == name);
-    let until = args.iter().position(|arg| arg == "--until").and_then(|i| args.get(i + 1)).map(PathBuf::from);
-    if !flag("--watch") && !flag("--once") {
-        let marker = cache_dir().join(format!("codex-{}.pid", std::process::id()));
-        match codex::launch(&args, &marker) {
-            Ok(code) => std::process::exit(code),
-            Err(err) => {
-                eprintln!("status_cli: {err}");
-                std::process::exit(1);
-            }
-        }
-    }
-    let watch = flag("--watch");
+    let (watch, once) = (flag("--watch"), flag("--once"));
     let mut reader = codex::Reader::default();
     let mut session: Option<(Option<String>, Session)> = None;
-    loop {
-        if until.as_deref().is_some_and(|marker| !marker.exists()) {
-            return;
-        }
+    let mut render = move |columns: Option<usize>| -> String {
         let now = now_millis();
-        let line = match reader.read(now) {
-            Ok(mut payload) => {
-                payload.terminal_width = terminal_size::terminal_size().map(|(width, _)| width.0 as usize);
-                let payload = payload.validated();
-                let key = payload.session_key();
-                if session.as_ref().is_none_or(|(open, _)| *open != key) {
-                    session = Some((key.clone(), Session::open(&cache_dir(), key.as_deref(), now)));
-                }
-                let Some((_, state)) = session.as_mut() else { continue };
-                state.advance(now);
-                let output = line(&payload, now, state).render(now);
-                state.save();
-                output
-            }
-            Err(err) => format!("status_cli: {err}"),
+        let mut payload = match reader.read(now) {
+            Ok(payload) => payload,
+            Err(err) => return format!("status_cli: {err}"),
         };
-        let mut stdout = io::stdout().lock();
-        if !watch {
-            let _ = writeln!(stdout, "{line}");
-            return;
+        payload.terminal_width = columns;
+        let payload = payload.validated();
+        let key = payload.session_key();
+        if session.as_ref().is_none_or(|(open, _)| *open != key) {
+            session = Some((key.clone(), Session::open(&cache_dir(), key.as_deref(), now)));
         }
-        let _ = write!(stdout, "\r\x1b[2K{line}");
-        let _ = stdout.flush();
-        drop(stdout);
-        thread::sleep(Duration::from_millis(1000 - now % 1000));
+        let Some((_, state)) = session.as_mut() else { return String::new() };
+        state.advance(now);
+        let output = line(&payload, now, state).render(now);
+        state.save();
+        output
+    };
+    let terminal_width = || terminal_size::terminal_size().map(|(width, _)| width.0 as usize);
+
+    if once {
+        println!("{}", render(terminal_width()));
+        return;
+    }
+    if watch {
+        loop {
+            let mut stdout = io::stdout().lock();
+            let _ = write!(stdout, "\r\x1b[2K{}", render(terminal_width()));
+            let _ = stdout.flush();
+            drop(stdout);
+            thread::sleep(Duration::from_millis(1000 - now_millis() % 1000));
+        }
+    }
+    let (program, program_args) = codex::command(&args);
+    match wrap::run(&program, &program_args, |columns| render(Some(columns))) {
+        Ok(code) => std::process::exit(code),
+        Err(err) => {
+            eprintln!("status_cli: could not start {program}: {err}");
+            std::process::exit(1);
+        }
     }
 }
 

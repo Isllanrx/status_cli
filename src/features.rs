@@ -5,3 +5,4 @@ pub mod model;
 pub mod quota;
 pub mod setup;
 pub mod telemetry;
+pub mod wrap;

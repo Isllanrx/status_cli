@@ -44,17 +44,3 @@ fn codex_mode_reports_a_missing_session() {
         .unwrap();
     assert!(String::from_utf8(out.stdout).unwrap().contains("status_cli: no Codex session found"));
 }
-
-#[test]
-fn watcher_stops_when_the_launcher_marker_is_gone() {
-    let temp = TempDir::new();
-    let started = std::time::Instant::now();
-    let out = Command::new(env!("CARGO_BIN_EXE_status_cli"))
-        .args(["codex", "--watch", "--until"])
-        .arg(temp.0.join("missing.pid"))
-        .env("CODEX_HOME", &temp.0)
-        .output()
-        .unwrap();
-    assert!(out.status.success());
-    assert!(started.elapsed() < std::time::Duration::from_secs(2));
-}
