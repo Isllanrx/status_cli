@@ -30,7 +30,7 @@ fn codex_mode_renders_the_latest_session_with_the_same_line() {
     let text = text.trim();
     assert!(text.starts_with("gpt-6-luna - Medium ╱ sessão "), "{text:?}");
     assert!(text.contains(" 40% ↻ ") && text.contains("semana") && text.contains(" 12%"), "{text:?}");
-    assert!(text.contains("contexto") && text.contains(" 25%"), "{text:?}");
+    assert!(text.contains("contexto") && text.contains(" 20%"), "{text:?}");
     assert!(text.contains("tempo"), "{text:?}");
 }
 

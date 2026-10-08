@@ -8,33 +8,62 @@ use std::time::SystemTime;
 use serde_json::Value;
 
 use crate::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Window};
+use crate::time::parse_utc_millis;
 
 const TAIL_BYTES: u64 = 256 * 1024;
 const RECENT_DAYS: usize = 2;
 const RESCAN_MS: u64 = 5_000;
 
+const CONTEXT_BASELINE_TOKENS: f64 = 12_000.0;
+const LAUNCH_TOLERANCE_MS: u64 = 2_000;
+const DAY_MINUTES: u64 = 1_440;
+const LAUNCH_RESCAN_MS: u64 = 1_000;
+
 #[derive(Default)]
 pub struct Reader {
+    launch: Option<(u64, PathBuf)>,
     file: Option<PathBuf>,
     scanned_at: u64,
     stamp: Option<(u64, SystemTime)>,
     parsed: Option<(Payload, Option<u64>)>,
 }
 
+struct Meta {
+    id: Option<String>,
+    started: Option<u64>,
+    cwd: Option<PathBuf>,
+    subagent: bool,
+}
+
 impl Reader {
+    pub fn for_launch(since: u64, cwd: PathBuf) -> Self {
+        Self { launch: Some((since, cwd)), ..Self::default() }
+    }
+
     pub fn read(&mut self, now: u64) -> Result<Payload, Box<dyn Error>> {
-        if self.file.is_none() || now.saturating_sub(self.scanned_at) >= RESCAN_MS {
-            self.file = latest_session(&sessions_dir().ok_or("Codex home directory not found")?);
+        let missing = self.file.as_deref().is_none_or(|file| !file.exists());
+        let interval = if self.launch.is_some() { LAUNCH_RESCAN_MS } else { RESCAN_MS };
+        let due = self.scanned_at == 0 || now.saturating_sub(self.scanned_at) >= interval;
+        if due && (missing || self.launch.is_none()) {
+            let sessions = sessions_dir().ok_or("Codex home directory not found")?;
+            self.file = match &self.launch {
+                Some((since, cwd)) => launched_session(&sessions, *since, cwd),
+                None => latest_session(&sessions),
+            };
             self.scanned_at = now;
         }
-        let file = self.file.as_deref().ok_or("no Codex session found")?;
+        let missing = if self.launch.is_some() { "waiting for the Codex session" } else { "no Codex session found" };
+        let file = self.file.as_deref().ok_or(missing)?;
         let metadata = fs::metadata(file)?;
         let stamp = Some((metadata.len(), metadata.modified()?));
         if self.stamp != stamp || self.parsed.is_none() {
-            self.parsed = Some((parse_session(file)?, first_timestamp(file)));
+            let meta = session_meta(file);
+            let mut payload = parse_session(file)?;
+            payload.session_id = meta.as_ref().and_then(|meta| meta.id.clone());
+            self.parsed = Some((payload, meta.and_then(|meta| meta.started)));
             self.stamp = stamp;
         }
-        let (payload, started) = self.parsed.as_ref().ok_or("no Codex session found")?;
+        let (payload, started) = self.parsed.as_ref().ok_or(missing)?;
         let mut payload = payload.clone();
         payload.cost = started.map(|started| Cost { total_duration_ms: Some(now.saturating_sub(started)) });
         Ok(payload)
@@ -54,31 +83,50 @@ fn parse_session(file: &Path) -> Result<Payload, Box<dyn Error>> {
                 });
                 payload.effort = body["effort"].as_str().map(|level| Effort { level: level.to_owned() });
             }
-            (Some("event_msg"), Some("token_count")) if payload.rate_limits.is_none() => {
+            (Some("event_msg"), Some("token_count")) => {
                 let limits = &body["rate_limits"];
-                payload.rate_limits =
-                    Some(RateLimits { five_hour: window(&limits["primary"]), seven_day: window(&limits["secondary"]) });
-                let size = body["info"]["model_context_window"].as_f64();
-                let used = body["info"]["last_token_usage"]["total_tokens"].as_f64();
-                payload.context_window = Some(ContextWindow {
-                    used_percentage: used
-                        .zip(size)
-                        .filter(|(_, size)| *size > 0.0)
-                        .map(|(used, size)| used / size * 100.0),
-                    context_window_size: size,
-                });
+                if payload.rate_limits.is_none()
+                    && limits.is_object()
+                    && matches!(limits["limit_id"].as_str(), None | Some("codex"))
+                {
+                    payload.rate_limits = Some(rate_limits(limits));
+                }
+                if payload.context_window.is_none() && body["info"].is_object() {
+                    payload.context_window = Some(context(&body["info"]));
+                }
             }
             _ => {}
         }
-        if payload.model.is_some() && payload.rate_limits.is_some() {
+        if payload.model.is_some() && payload.rate_limits.is_some() && payload.context_window.is_some() {
             break;
         }
     }
-    payload.session_id = file.file_stem().and_then(|stem| stem.to_str()).map(|stem| {
-        let start = stem.len().saturating_sub(36);
-        stem[start..].to_owned()
-    });
     Ok(payload)
+}
+
+fn rate_limits(limits: &Value) -> RateLimits {
+    let mut out = RateLimits::default();
+    for (key, primary) in [("primary", true), ("secondary", false)] {
+        let Some(window) = window(&limits[key]) else { continue };
+        let short = limits[key]["window_minutes"].as_u64().map_or(primary, |minutes| minutes <= DAY_MINUTES);
+        if short {
+            out.five_hour = Some(window);
+        } else {
+            out.seven_day = Some(window);
+        }
+    }
+    out
+}
+
+fn context(info: &Value) -> ContextWindow {
+    let size = info["model_context_window"].as_f64();
+    let used = info["last_token_usage"]["total_tokens"].as_f64();
+    let used_percentage = used.zip(size).and_then(|(used, size)| {
+        let effective = size - CONTEXT_BASELINE_TOKENS;
+        let remaining = (effective - (used - CONTEXT_BASELINE_TOKENS).max(0.0)) / effective;
+        (effective > 0.0).then(|| (1.0 - remaining.clamp(0.0, 1.0)) * 100.0)
+    });
+    ContextWindow { used_percentage, context_window_size: size }
 }
 
 pub fn command(args: &[String]) -> (String, Vec<String>) {
@@ -144,12 +192,47 @@ fn tail_records(file: &Path) -> Result<Vec<Value>, Box<dyn Error>> {
     Ok(lines.filter_map(|line| serde_json::from_str(line).ok()).collect())
 }
 
-fn first_timestamp(file: &Path) -> Option<u64> {
+fn session_meta(file: &Path) -> Option<Meta> {
     let mut line = String::new();
     BufReader::new(File::open(file).ok()?).read_line(&mut line).ok()?;
     let record: Value = serde_json::from_str(&line).ok()?;
-    let timestamp = record["timestamp"].as_str().or_else(|| record["payload"]["timestamp"].as_str())?;
-    parse_utc_millis(timestamp)
+    let meta = &record["payload"];
+    let timestamp = meta["timestamp"].as_str().or_else(|| record["timestamp"].as_str());
+    Some(Meta {
+        id: meta["id"].as_str().map(str::to_owned),
+        started: timestamp.and_then(parse_utc_millis),
+        cwd: meta["cwd"].as_str().map(PathBuf::from),
+        subagent: !meta["parent_thread_id"].is_null(),
+    })
+}
+
+fn launched_session(sessions: &Path, since: u64, cwd: &Path) -> Option<PathBuf> {
+    let since = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(since.saturating_sub(LAUNCH_TOLERANCE_MS));
+    let children = |dir: &Path| newest_children(dir, usize::MAX);
+    children(sessions)
+        .iter()
+        .flat_map(|year| children(year))
+        .flat_map(|month| children(&month))
+        .flat_map(|day| fs::read_dir(day).into_iter().flatten().flatten())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .filter_map(|path| Some((fs::metadata(&path).ok()?.modified().ok()?, path)))
+        .filter(|(modified, _)| *modified >= since)
+        .filter(|(_, path)| {
+            session_meta(path)
+                .is_some_and(|meta| !meta.subagent && meta.cwd.as_deref().is_some_and(|dir| same_dir(dir, cwd)))
+        })
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, path)| path)
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    let normalize = |path: &Path| {
+        let text = path.to_string_lossy().replace('\\', "/");
+        let text = text.trim_end_matches('/').to_owned();
+        if cfg!(windows) { text.to_lowercase() } else { text }
+    };
+    normalize(a) == normalize(b)
 }
 
 fn window(value: &Value) -> Option<Window> {
@@ -157,30 +240,42 @@ fn window(value: &Value) -> Option<Window> {
     Some(Window { used_percentage: Some(used), resets_at: value["resets_at"].as_f64() })
 }
 
-fn parse_utc_millis(timestamp: &str) -> Option<u64> {
-    let field = |range: std::ops::Range<usize>| timestamp.get(range)?.parse::<i64>().ok();
-    let (year, month, day) = (field(0..4)?, field(5..7)?, field(8..10)?);
-    let (hour, minute, second) = (field(11..13)?, field(14..16)?, field(17..19)?);
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second;
-    u64::try_from(seconds).ok().map(|s| s * 1000)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parses_rfc3339_utc_timestamps() {
-        assert_eq!(parse_utc_millis("1970-01-02T00:00:00Z"), Some(86_400_000));
-        assert_eq!(parse_utc_millis("2000-03-01T00:00:00.123Z"), Some(951_868_800_000));
-        assert_eq!(parse_utc_millis("2026-10-08T05:52:12Z"), Some(1_791_438_732_000));
-        assert_eq!(parse_utc_millis("garbage"), None);
+    fn windows_are_labelled_by_their_length() {
+        let limits = serde_json::json!({
+            "primary": {"used_percent": 70.0, "window_minutes": 10080, "resets_at": 1},
+            "secondary": {"used_percent": 5.0, "window_minutes": 300, "resets_at": 2}
+        });
+        let out = rate_limits(&limits);
+        assert_eq!(out.five_hour.unwrap().used_percentage, Some(5.0));
+        assert_eq!(out.seven_day.unwrap().used_percentage, Some(70.0));
+    }
+
+    #[test]
+    fn context_matches_the_codex_formula() {
+        let info = serde_json::json!({"model_context_window": 200_000, "last_token_usage": {"total_tokens": 50_000}});
+        assert_eq!(context(&info).used_percentage.map(f64::round), Some(20.0));
+        let small = serde_json::json!({"model_context_window": 258_400, "last_token_usage": {"total_tokens": 8_000}});
+        assert_eq!(context(&small).used_percentage, Some(0.0));
+    }
+
+    #[test]
+    fn only_codex_limits_are_used() {
+        let dir = std::env::temp_dir().join(format!("status_cli-codex-unit-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("rollout.jsonl");
+        let lines = [
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"codex","primary":{"used_percent":40.0,"window_minutes":300}}}}"#,
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"limit_id":"codex_other","primary":{"used_percent":99.0,"window_minutes":300}}}}"#,
+        ];
+        fs::write(&file, lines.join("\n")).unwrap();
+        let payload = parse_session(&file).unwrap();
+        assert_eq!(payload.rate_limits.unwrap().five_hour.unwrap().used_percentage, Some(40.0));
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
