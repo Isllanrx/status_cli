@@ -9,6 +9,7 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   CARGO_TERM_COLOR: always
+  STATUS_CLI_LANG: pt
 
 permissions:
   contents: read
@@ -186,7 +187,7 @@ jobs:
       - run: |
           chmod +x bin/status_cli
           printf '{"session_id":"ci","model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"cost":{"total_duration_ms":60000}}' > bin/payload.json
-          out=$(docker run --rm -e COLUMNS=150 -e NO_COLOR=1 -v "$PWD/bin:/v:ro" "${{ matrix.image }}" sh -c '/v/status_cli < /v/payload.json')
+          out=$(docker run --rm -e COLUMNS=150 -e NO_COLOR=1 -e STATUS_CLI_LANG=pt -v "$PWD/bin:/v:ro" "${{ matrix.image }}" sh -c '/v/status_cli < /v/payload.json')
           echo "$out"
           case "$out" in *"Opus - High"*tempo*) ;; *) exit 1 ;; esac
 
