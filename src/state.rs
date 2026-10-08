@@ -96,6 +96,9 @@ impl Session {
         if let Some(file) = &self.file
             && self.current != self.saved
             && let Ok(json) = serde_json::to_string(&self.current)
+            && fs::write(file, &json).is_err()
+            && let Some(dir) = file.parent()
+            && fs::create_dir_all(dir).is_ok()
         {
             let _ = fs::write(file, json);
         }

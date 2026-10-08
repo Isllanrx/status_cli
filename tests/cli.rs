@@ -17,8 +17,10 @@ impl TempDir {
     }
 
     fn cache_files(&self) -> Vec<String> {
-        let mut names: Vec<_> =
-            fs::read_dir(&self.0).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let mut names: Vec<_> = fs::read_dir(self.0.join("status_cli"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
         names.sort();
         names
     }
@@ -52,7 +54,7 @@ fn run_with(temp: &TempDir, input: &str, columns: Option<usize>, vars: &[(&str, 
         .env("TMP", &temp.0)
         .env_remove("COLUMNS")
         .env_remove("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
-        .env_remove("XDG_RUNTIME_DIR")
+        .env("XDG_RUNTIME_DIR", &temp.0)
         .env_remove("STATUS_CLI_LOG")
         .env_remove("STATUS_CLI_COLOR")
         .env_remove("STATUS_CLI_ASCII")
@@ -136,7 +138,7 @@ fn each_session_keeps_its_own_clock() {
 fn clock_ticks_between_events_and_rebases_on_new_duration() {
     let temp = TempDir::new();
     assert_clock(&run(&temp, &claude("a", 3_540_000), Some(160)).text, "00:59");
-    let file = temp.0.join("status_cli-a");
+    let file = temp.0.join("status_cli").join("status_cli-a");
     let mut state: serde_json::Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
     let at = state["clock"]["at"].as_u64().unwrap();
     state["clock"]["at"] = (at - 125_000).into();
@@ -186,7 +188,8 @@ fn agy_line_uses_quota_mode_and_terminal_width() {
 #[test]
 fn stale_caches_are_pruned() {
     let temp = TempDir::new();
-    let old = temp.0.join("status_cli-old");
+    fs::create_dir_all(temp.0.join("status_cli")).unwrap();
+    let old = temp.0.join("status_cli").join("status_cli-old");
     File::create(&old).unwrap().set_modified(SystemTime::now() - Duration::from_secs(8 * 86_400)).unwrap();
     run(&temp, &claude("new", 0), Some(160));
     assert!(!old.exists());
@@ -213,16 +216,17 @@ fn log_records_one_json_line_per_run() {
     assert_eq!(lines[0]["session"], "a");
     assert!(lines[0]["error"].is_null());
     assert!(lines[0]["us"].as_u64().is_some());
+    for phase in ["stdin", "parse", "state_load", "features", "render", "state_save", "stdout"] {
+        assert!(lines[0]["phases"][phase].as_u64().is_some(), "{phase}");
+    }
     assert!(lines[1]["error"].as_str().unwrap().starts_with("key must be a string"));
 }
 
 #[test]
-fn runtime_dir_takes_precedence_for_the_cache() {
+fn state_lives_in_a_dedicated_directory_created_on_demand() {
     let temp = TempDir::new();
-    let runtime = temp.0.join("runtime");
-    fs::create_dir(&runtime).unwrap();
-    run_with(&temp, &claude("a", 0), None, &[("XDG_RUNTIME_DIR", runtime.to_str().unwrap())]);
-    assert!(runtime.join("status_cli-a").exists());
+    run(&temp, &claude("a", 0), None);
+    assert!(temp.0.join("status_cli").join("status_cli-a").exists());
 }
 
 #[test]

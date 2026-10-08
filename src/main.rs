@@ -9,9 +9,9 @@ use std::env;
 use std::error::Error;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use features::telemetry::{self, Event};
+use features::telemetry::{self, Event, Timer};
 use features::{clock, context, model, quota};
 use layout::Line;
 use payload::Payload;
@@ -20,38 +20,52 @@ use state::Session;
 const MAX_INPUT_BYTES: u64 = 1 << 20;
 
 fn main() {
-    let started = Instant::now();
+    let mut timer = Timer::start();
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-    let payload = read_payload();
+    let payload = read_input().and_then(|input| {
+        timer.mark("stdin");
+        let payload = parse(&input);
+        timer.mark("parse");
+        payload
+    });
     let output = match &payload {
         Ok(payload) => {
             let mut session = Session::open(&cache_dir(), payload.session_key().as_deref(), now);
-            let output = line(payload, now, &mut session).render(now);
+            timer.mark("state_load");
+            let line = line(payload, now, &mut session);
+            timer.mark("features");
+            let output = line.render(now);
+            timer.mark("render");
             session.save();
+            timer.mark("state_save");
             output
         }
         Err(err) => format!("status_cli: {err}"),
     };
     let _ = io::stdout().lock().write_all(output.as_bytes());
+    timer.mark("stdout");
 
     if let Some(path) = env::var_os("STATUS_CLI_LOG") {
         let error = payload.as_ref().err().map(ToString::to_string);
         let payload = payload.as_ref().ok();
         let event = Event {
             now,
-            took: started.elapsed(),
             host: payload.map(|p| p.host().name()),
             session: payload.and_then(Payload::session_key),
             error,
         };
-        telemetry::record(path.as_ref(), event);
+        telemetry::record(path.as_ref(), event, &timer);
     }
 }
 
-fn read_payload() -> Result<Payload, Box<dyn Error>> {
-    let mut input = String::new();
-    io::stdin().take(MAX_INPUT_BYTES).read_to_string(&mut input)?;
-    Ok(serde_json::from_str(input.strip_prefix('\u{feff}').unwrap_or(&input))?)
+fn read_input() -> Result<Vec<u8>, Box<dyn Error>> {
+    let mut input = Vec::with_capacity(4096);
+    io::stdin().lock().take(MAX_INPUT_BYTES).read_to_end(&mut input)?;
+    Ok(input)
+}
+
+fn parse(input: &[u8]) -> Result<Payload, Box<dyn Error>> {
+    Ok(serde_json::from_slice(input.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(input))?)
 }
 
 fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
@@ -65,7 +79,13 @@ fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
 }
 
 fn cache_dir() -> PathBuf {
-    env::var_os("XDG_RUNTIME_DIR").map_or_else(env::temp_dir, PathBuf::from)
+    let base = ["XDG_RUNTIME_DIR", "LOCALAPPDATA", "XDG_CACHE_HOME"]
+        .into_iter()
+        .find_map(env::var_os)
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+        .unwrap_or_else(env::temp_dir);
+    base.join("status_cli")
 }
 
 fn env_number(name: &str) -> Option<f64> {
