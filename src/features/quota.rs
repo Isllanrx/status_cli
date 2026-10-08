@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::i18n::labels;
 use crate::payload::{self, Host, Payload};
 use crate::state::{Motion, Session};
 use crate::style::{Frame, Gauge, SOFT, duration, heat, paint};
@@ -35,8 +36,8 @@ pub fn read(payload: &Payload, now: u64, session: &mut Session) -> Vec<Quota> {
             let five = limits.and_then(|l| l.five_hour.as_ref());
             let week = limits.and_then(|l| l.seven_day.as_ref());
             vec![
-                quota("sessão", used(five), resets_at(five), Some(FIVE_HOURS_MS), true),
-                quota("semana", used(week), resets_at(week), Some(SEVEN_DAYS_MS), false),
+                quota(labels().session, used(five), resets_at(five), Some(FIVE_HOURS_MS), true),
+                quota(labels().week, used(week), resets_at(week), Some(SEVEN_DAYS_MS), false),
             ]
         }
         Host::Agy => {
@@ -58,13 +59,13 @@ pub fn read(payload: &Payload, now: u64, session: &mut Session) -> Vec<Quota> {
             let windows = quotas.map(|q| family_windows(q, &model)).unwrap_or_default();
             if windows.is_empty() {
                 let current = quotas.and_then(|q| pick(q, &model));
-                return vec![quota("cota", current.and_then(used), current.and_then(resets), None, true)];
+                return vec![quota(labels().quota, current.and_then(used), current.and_then(resets), None, true)];
             }
             windows
                 .into_iter()
                 .map(|(span, q)| {
                     let short = span < DAY_MS;
-                    quota(if short { "sessão" } else { "semana" }, used(q), resets(q), Some(span), short)
+                    quota(if short { labels().session } else { labels().week }, used(q), resets(q), Some(span), short)
                 })
                 .collect()
         }

@@ -1,3 +1,4 @@
+use crate::i18n::labels;
 use crate::payload::{Host, Payload};
 use crate::state::{Motion, Session};
 use crate::style::{Frame, Gauge};
@@ -13,10 +14,10 @@ pub fn read(payload: &Payload, compact_override: Option<f64>, session: &mut Sess
     let window = payload.context_window.as_ref();
     let (label, pct) = match payload.host() {
         Host::Claude => (
-            "compactar",
+            labels().compact,
             window.and_then(|w| compact_progress(w.used_percentage?, w.context_window_size?, compact_override)),
         ),
-        Host::Agy | Host::Codex => ("contexto", window.and_then(|w| w.used_percentage)),
+        Host::Agy | Host::Codex => (labels().context, window.and_then(|w| w.used_percentage)),
     };
     Context { label, motion: session.track(label, pct) }
 }

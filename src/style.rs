@@ -203,6 +203,24 @@ pub fn strip(s: &str) -> String {
         .collect()
 }
 
+pub fn char_width(c: char) -> usize {
+    match c as u32 {
+        0x1100..=0x115F
+        | 0x2E80..=0x303E
+        | 0x3041..=0x33FF
+        | 0x3400..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xA000..=0xA4CF
+        | 0xAC00..=0xD7A3
+        | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE4F
+        | 0xFF00..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0x20000..=0x3FFFD => 2,
+        _ => 1,
+    }
+}
+
 pub fn truncate_visible(s: &str, width: usize) -> String {
     let mut out = String::with_capacity(s.len());
     let (mut visible, mut in_escape) = (0, false);
@@ -210,10 +228,10 @@ pub fn truncate_visible(s: &str, width: usize) -> String {
         let is_escape = in_escape || c == '\x1b';
         in_escape = is_escape && c != 'm';
         if !is_escape {
-            if visible == width {
+            if visible + char_width(c) > width {
                 break;
             }
-            visible += 1;
+            visible += char_width(c);
         }
         out.push(c);
     }
@@ -231,7 +249,8 @@ pub fn visible_width(s: &str) -> usize {
             in_escape = (in_escape || c == '\x1b') && c != 'm';
             visible
         })
-        .count()
+        .map(char_width)
+        .sum()
 }
 
 #[cfg(test)]
@@ -255,6 +274,12 @@ mod tests {
         assert_eq!(cut, "\x1b[1mabc\x1b[0md\x1b[0m");
         assert_eq!(visible_width(&cut), 4);
         assert_eq!(truncate_visible("plain", 9), "plain");
+    }
+
+    #[test]
+    fn wide_characters_take_two_columns() {
+        assert_eq!(visible_width("会话 ab"), 7);
+        assert_eq!(truncate_visible("会话ab", 3), "会");
     }
 
     #[test]

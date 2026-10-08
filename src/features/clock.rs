@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use crate::i18n::labels;
 use crate::payload::{Host, Payload};
 use crate::state::Session;
 use crate::style::{Frame, LABEL, SOFT, STRONG, TRACK, paint};
@@ -50,7 +51,7 @@ fn file_created(path: &Path) -> Option<u64> {
 pub fn render(ms: u64, frame: &Frame) -> String {
     let minutes = ms / 60_000;
     let minute_turned = (ms / 1000) % 60 == 0 && ms > 0;
-    let label = if frame.tight { String::new() } else { paint(LABEL, "tempo ") };
+    let label = if frame.tight { String::new() } else { paint(LABEL, format_args!("{} ", labels().time)) };
     let hand = paint(SOFT, format_args!("{} ", caps().glyphs.hands[((frame.now / 1000) % 4) as usize]));
     let colon = paint(if frame.odd_second() { TRACK } else { STRONG }, ':');
     let minutes_style = if minute_turned { STRONG.underline() } else { STRONG };

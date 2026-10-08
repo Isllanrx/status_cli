@@ -1,4 +1,5 @@
 mod features;
+mod i18n;
 mod layout;
 mod payload;
 mod state;
@@ -31,6 +32,11 @@ fn main() {
     }
     match env::args().nth(1).as_deref() {
         Some("setup") => return run_setup(),
+        Some("doctor") => {
+            let (lines, healthy) = setup::doctor();
+            lines.iter().for_each(|line| println!("{line}"));
+            std::process::exit(if healthy { 0 } else { 1 });
+        }
         Some("codex") => return run_codex(env::args().skip(2).collect()),
         Some("--version" | "-V") => return println!("status_cli {}", env!("CARGO_PKG_VERSION")),
         _ => {}
