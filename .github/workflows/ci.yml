@@ -218,8 +218,9 @@ jobs:
             name="${dir%/}"
             file=$(ls "$dir")
             ext="${file##*.}"; [ "$ext" = "$file" ] && ext="" || ext=".$ext"
-            mv "$dir$file" "$name$ext"
+            mv "$dir$file" "$name$ext.staged"
             rmdir "$dir"
+            mv "$name$ext.staged" "$name$ext"
           done
           sha256sum * > SHA256SUMS
       - env:
