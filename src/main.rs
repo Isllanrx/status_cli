@@ -18,6 +18,7 @@ use payload::Payload;
 use state::Session;
 
 const MAX_INPUT_BYTES: u64 = 1 << 20;
+const PAD_CHARS: [char; 2] = ['\u{2800}', ' '];
 
 fn main() {
     let mut timer = Timer::start();
@@ -52,6 +53,10 @@ fn main() {
             now,
             host: payload.map(|p| p.host().name()),
             session: payload.and_then(Payload::session_key),
+            model: payload.and_then(|p| p.model.as_ref()?.display_name.clone()),
+            effort: payload
+                .and_then(|p| p.effort.as_ref().map(|e| e.level.clone()).or_else(|| p.execution_mode.clone())),
+            line: style::strip(&output).trim_start_matches(PAD_CHARS).to_owned(),
             error,
         };
         telemetry::record(path.as_ref(), event, &timer);
@@ -65,7 +70,7 @@ fn read_input() -> Result<Vec<u8>, Box<dyn Error>> {
 }
 
 fn parse(input: &[u8]) -> Result<Payload, Box<dyn Error>> {
-    Ok(serde_json::from_slice(input.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(input))?)
+    Ok(serde_json::from_slice::<Payload>(input.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(input))?.validated())
 }
 
 fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
@@ -74,7 +79,10 @@ fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
         quotas: quota::read(payload, now, session),
         context: context::read(payload, env_number("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"), session),
         elapsed: clock::read(payload, session),
-        columns: payload.terminal_width.or(env_number("COLUMNS").map(|c| c as usize)).filter(|&c| c > 0),
+        columns: payload
+            .terminal_width
+            .or(env_number("COLUMNS").map(|c| (c as usize).min(payload::MAX_COLUMNS)))
+            .filter(|&c| c > 0),
     }
 }
 

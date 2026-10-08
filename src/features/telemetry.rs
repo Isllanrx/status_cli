@@ -28,6 +28,9 @@ pub struct Event {
     pub now: u64,
     pub host: Option<&'static str>,
     pub session: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub line: String,
     pub error: Option<String>,
 }
 
@@ -42,6 +45,9 @@ pub fn record(path: &Path, event: Event, timer: &Timer) {
         "phases": phases,
         "host": event.host,
         "session": event.session,
+        "model": event.model,
+        "effort": event.effort,
+        "line": event.line,
         "error": event.error,
     });
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
