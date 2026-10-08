@@ -9,9 +9,7 @@ A status line for [Claude Code](https://code.claude.com/docs/en/statusline) and 
 limits you have spent, how close the conversation is to auto-compact and how long the session has been running,
 right-aligned at the bottom of the terminal.
 
-```
-Opus - High ╱ sessão ━━━━━━━━── 82% ↻ 2m ╱ semana ━━━━━───── 53% ⇥ 2d2h ╱ compactar ━━━━────── 37% ╱ tempo ◷ 00:44
-```
+![status_cli in a terminal: model and effort, session and weekly usage bars, auto-compact progress and session clock](interface.png)
 
 A single static binary written in Rust. It needs no runtime, makes no network calls and finishes in under a
 millisecond of its own work.
