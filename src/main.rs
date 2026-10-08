@@ -84,18 +84,25 @@ fn run_codex(args: Vec<String>) {
         }
     }
     let watch = flag("--watch");
+    let mut reader = codex::Reader::default();
+    let mut session: Option<(Option<String>, Session)> = None;
     loop {
         if until.as_deref().is_some_and(|marker| !marker.exists()) {
             return;
         }
         let now = now_millis();
-        let line = match codex::payload(now) {
+        let line = match reader.read(now) {
             Ok(mut payload) => {
                 payload.terminal_width = terminal_size::terminal_size().map(|(width, _)| width.0 as usize);
                 let payload = payload.validated();
-                let mut session = Session::open(&cache_dir(), payload.session_key().as_deref(), now);
-                let output = line(&payload, now, &mut session).render(now);
-                session.save();
+                let key = payload.session_key();
+                if session.as_ref().is_none_or(|(open, _)| *open != key) {
+                    session = Some((key.clone(), Session::open(&cache_dir(), key.as_deref(), now)));
+                }
+                let Some((_, state)) = session.as_mut() else { continue };
+                state.advance(now);
+                let output = line(&payload, now, state).render(now);
+                state.save();
                 output
             }
             Err(err) => format!("status_cli: {err}"),

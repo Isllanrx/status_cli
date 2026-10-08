@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 use serde_json::Value;
 
@@ -12,12 +13,39 @@ use crate::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Wi
 
 const TAIL_BYTES: u64 = 256 * 1024;
 const RECENT_DAYS: usize = 2;
+const RESCAN_MS: u64 = 5_000;
 
-pub fn payload(now: u64) -> Result<Payload, Box<dyn Error>> {
-    let sessions = sessions_dir().ok_or("Codex home directory not found")?;
-    let file = latest_session(&sessions).ok_or("no Codex session found")?;
+#[derive(Default)]
+pub struct Reader {
+    file: Option<PathBuf>,
+    scanned_at: u64,
+    stamp: Option<(u64, SystemTime)>,
+    parsed: Option<(Payload, Option<u64>)>,
+}
+
+impl Reader {
+    pub fn read(&mut self, now: u64) -> Result<Payload, Box<dyn Error>> {
+        if self.file.is_none() || now.saturating_sub(self.scanned_at) >= RESCAN_MS {
+            self.file = latest_session(&sessions_dir().ok_or("Codex home directory not found")?);
+            self.scanned_at = now;
+        }
+        let file = self.file.as_deref().ok_or("no Codex session found")?;
+        let metadata = fs::metadata(file)?;
+        let stamp = Some((metadata.len(), metadata.modified()?));
+        if self.stamp != stamp || self.parsed.is_none() {
+            self.parsed = Some((parse_session(file)?, first_timestamp(file)));
+            self.stamp = stamp;
+        }
+        let (payload, started) = self.parsed.as_ref().ok_or("no Codex session found")?;
+        let mut payload = payload.clone();
+        payload.cost = started.map(|started| Cost { total_duration_ms: Some(now.saturating_sub(started)) });
+        Ok(payload)
+    }
+}
+
+fn parse_session(file: &Path) -> Result<Payload, Box<dyn Error>> {
     let mut payload = Payload { product: Some("codex".to_owned()), ..Payload::default() };
-    for record in tail_records(&file)?.iter().rev() {
+    for record in tail_records(file)?.iter().rev() {
         let body = &record["payload"];
         match (record["type"].as_str(), body["type"].as_str()) {
             (Some("turn_context"), _) if payload.model.is_none() => {
@@ -52,7 +80,6 @@ pub fn payload(now: u64) -> Result<Payload, Box<dyn Error>> {
         let start = stem.len().saturating_sub(36);
         stem[start..].to_owned()
     });
-    payload.cost = first_timestamp(&file).map(|started| Cost { total_duration_ms: Some(now.saturating_sub(started)) });
     Ok(payload)
 }
 

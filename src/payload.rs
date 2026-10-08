@@ -6,7 +6,7 @@ pub const MAX_COLUMNS: usize = 1000;
 const MAX_TEXT_CHARS: usize = 48;
 const MAX_KEY_CHARS: usize = 128;
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct Payload {
     pub session_id: Option<String>,
     pub conversation_id: Option<String>,
@@ -23,43 +23,43 @@ pub struct Payload {
     pub terminal_width: Option<usize>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct Model {
     pub id: Option<String>,
     pub display_name: Option<String>,
     pub effort: Option<String>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct Effort {
     pub level: String,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct RateLimits {
     pub five_hour: Option<Window>,
     pub seven_day: Option<Window>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct Window {
     pub used_percentage: Option<f64>,
     pub resets_at: Option<f64>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct Quota {
     pub remaining_fraction: Option<f64>,
     pub reset_in_seconds: Option<f64>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct ContextWindow {
     pub used_percentage: Option<f64>,
     pub context_window_size: Option<f64>,
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct Cost {
     pub total_duration_ms: Option<u64>,
 }

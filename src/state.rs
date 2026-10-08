@@ -11,7 +11,7 @@ const TTL: Duration = Duration::from_secs(7 * 86_400);
 const TRANSITION_MS: u64 = 3_000;
 const CLOCK_DRIFT_MS: u64 = 2_000;
 
-#[derive(Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq)]
 struct Snapshot {
     clock: Option<Seen>,
     gauges: BTreeMap<String, Trend>,
@@ -93,15 +93,22 @@ impl Session {
         Some(Motion { shown, growing: trend.to > trend.from && shown < trend.to })
     }
 
-    pub fn save(&self) {
-        if let Some(file) = &self.file
-            && self.current != self.saved
-            && let Ok(json) = serde_json::to_string(&self.current)
-            && write_atomic(file, json.as_bytes()).is_err()
-            && let Some(dir) = file.parent()
-            && fs::create_dir_all(dir).is_ok()
-        {
-            let _ = write_atomic(file, json.as_bytes());
+    pub fn advance(&mut self, now: u64) {
+        self.now = now;
+    }
+
+    pub fn save(&mut self) {
+        let Some(file) = &self.file else { return };
+        if self.current == self.saved {
+            return;
+        }
+        let Ok(json) = serde_json::to_string(&self.current) else { return };
+        let written = write_atomic(file, json.as_bytes()).or_else(|_| {
+            fs::create_dir_all(file.parent().ok_or(io::ErrorKind::NotFound)?)?;
+            write_atomic(file, json.as_bytes())
+        });
+        if written.is_ok() {
+            self.saved = self.current.clone();
         }
     }
 }
