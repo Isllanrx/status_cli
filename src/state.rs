@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -96,13 +97,23 @@ impl Session {
         if let Some(file) = &self.file
             && self.current != self.saved
             && let Ok(json) = serde_json::to_string(&self.current)
-            && fs::write(file, &json).is_err()
+            && write_atomic(file, json.as_bytes()).is_err()
             && let Some(dir) = file.parent()
             && fs::create_dir_all(dir).is_ok()
         {
-            let _ = fs::write(file, json);
+            let _ = write_atomic(file, json.as_bytes());
         }
     }
+}
+
+fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
+    let staging = file.with_extension(format!("tmp{}", std::process::id()));
+    fs::write(&staging, bytes)?;
+    let renamed = fs::rename(&staging, file).or_else(|_| fs::rename(&staging, file));
+    if renamed.is_err() {
+        let _ = fs::remove_file(&staging);
+    }
+    renamed
 }
 
 fn load(file: &Path) -> Option<Snapshot> {
@@ -125,6 +136,18 @@ fn prune(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atomic_write_replaces_without_leftovers() {
+        let dir = std::env::temp_dir().join(format!("status_cli-unit-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("state");
+        write_atomic(&file, b"old").unwrap();
+        write_atomic(&file, b"new").unwrap();
+        assert_eq!(fs::read(&file).unwrap(), b"new");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn clock_extrapolates_until_the_base_changes() {
