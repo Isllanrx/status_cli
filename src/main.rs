@@ -9,10 +9,11 @@ use std::env;
 use std::error::Error;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use features::telemetry::{self, Event, Timer};
-use features::{clock, context, model, quota, setup};
+use features::{clock, codex, context, model, quota, setup};
 use layout::Line;
 use payload::Payload;
 use state::Session;
@@ -23,11 +24,12 @@ const PAD_CHARS: [char; 2] = ['\u{2800}', ' '];
 fn main() {
     match env::args().nth(1).as_deref() {
         Some("setup") => return run_setup(),
+        Some("codex") => return run_codex(env::args().any(|arg| arg == "--watch")),
         Some("--version" | "-V") => return println!("status_cli {}", env!("CARGO_PKG_VERSION")),
         _ => {}
     }
     let mut timer = Timer::start();
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    let now = now_millis();
     let payload = read_input().and_then(|input| {
         timer.mark("stdin");
         let payload = parse(&input);
@@ -68,6 +70,36 @@ fn main() {
     }
 }
 
+fn run_codex(watch: bool) {
+    loop {
+        let now = now_millis();
+        let line = match codex::payload(now) {
+            Ok(mut payload) => {
+                payload.terminal_width = terminal_size::terminal_size().map(|(width, _)| width.0 as usize);
+                let payload = payload.validated();
+                let mut session = Session::open(&cache_dir(), payload.session_key().as_deref(), now);
+                let output = line(&payload, now, &mut session).render(now);
+                session.save();
+                output
+            }
+            Err(err) => format!("status_cli: {err}"),
+        };
+        let mut stdout = io::stdout().lock();
+        if !watch {
+            let _ = writeln!(stdout, "{line}");
+            return;
+        }
+        let _ = write!(stdout, "\r\x1b[2K{line}");
+        let _ = stdout.flush();
+        drop(stdout);
+        thread::sleep(Duration::from_millis(1000 - now % 1000));
+    }
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
 fn run_setup() {
     let mut failed = false;
     for outcome in setup::run() {
@@ -99,7 +131,7 @@ fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
         model: model::read(payload),
         quotas: quota::read(payload, now, session),
         context: context::read(payload, env_number("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"), session),
-        elapsed: clock::read(payload, session),
+        elapsed: clock::read(payload, session, now),
         columns: payload
             .terminal_width
             .or(env_number("COLUMNS").map(|c| (c as usize).min(payload::MAX_COLUMNS)))
