@@ -15,6 +15,7 @@ pub struct Glyphs {
     pub edge: char,
     pub separator: char,
     pub reset: char,
+    pub exhaust: char,
     pub missing: char,
     pub pad: char,
     pub hands: [char; 4],
@@ -26,6 +27,7 @@ const UNICODE: Glyphs = Glyphs {
     edge: '╸',
     separator: '╱',
     reset: '↻',
+    exhaust: '⇥',
     missing: '–',
     pad: '\u{2800}',
     hands: ['◴', '◷', '◶', '◵'],
@@ -37,13 +39,17 @@ const ASCII: Glyphs = Glyphs {
     edge: '>',
     separator: '/',
     reset: '~',
+    exhaust: '!',
     missing: '-',
     pad: ' ',
     hands: ['|', '/', '-', '\\'],
 };
 
-const TRUECOLOR_PROGRAMS: [&str; 8] =
-    ["iTerm.app", "WezTerm", "ghostty", "vscode", "Hyper", "Tabby", "WarpTerminal", "rio"];
+const TRUECOLOR_PROGRAMS: [&str; 9] =
+    ["iTerm.app", "WezTerm", "ghostty", "vscode", "Hyper", "Tabby", "WarpTerminal", "rio", "mintty"];
+const TRUECOLOR_TERMS: [&str; 7] =
+    ["xterm-kitty", "alacritty", "foot", "foot-extra", "xterm-ghostty", "wezterm", "contour"];
+const VTE_TRUECOLOR: u32 = 3600;
 
 pub struct Caps {
     pub depth: Depth,
@@ -58,7 +64,9 @@ pub fn caps() -> &'static Caps {
 fn detect(var: impl Fn(&str) -> Option<String>) -> Caps {
     let term = var("TERM").unwrap_or_default();
     let limited_console = term == "dumb" || term == "linux";
-    let ascii = var("STATUS_CLI_ASCII").is_some() || limited_console;
+    let locale = var("LC_ALL").or_else(|| var("LC_CTYPE")).or_else(|| var("LANG")).unwrap_or_default();
+    let wide_ambiguous = ["ja", "zh", "ko"].iter().any(|cjk| locale.starts_with(cjk));
+    let ascii = var("STATUS_CLI_ASCII").is_some() || limited_console || wide_ambiguous;
     Caps { depth: depth(&var, &term), glyphs: if ascii { &ASCII } else { &UNICODE } }
 }
 
@@ -75,14 +83,21 @@ fn depth(var: &impl Fn(&str) -> Option<String>, term: &str) -> Depth {
     }
     let colorterm = var("COLORTERM").unwrap_or_default();
     let program = var("TERM_PROGRAM").unwrap_or_default();
-    if matches!(colorterm.as_str(), "truecolor" | "24bit")
+    let vte = var("VTE_VERSION").and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+    if var("ConEmuANSI").is_some() {
+        Depth::Ansi256
+    } else if matches!(colorterm.as_str(), "truecolor" | "24bit")
         || var("WT_SESSION").is_some()
+        || var("KONSOLE_VERSION").is_some()
+        || var("KITTY_WINDOW_ID").is_some()
+        || vte >= VTE_TRUECOLOR
         || TRUECOLOR_PROGRAMS.contains(&program.as_str())
-        || term.contains("direct")
+        || TRUECOLOR_TERMS.contains(&term)
+        || term.ends_with("-direct")
         || (cfg!(windows) && term.is_empty())
     {
         Depth::TrueColor
-    } else if term == "linux" || term.is_empty() && cfg!(not(windows)) && program.is_empty() {
+    } else if term == "linux" || term == "screen" || term.is_empty() {
         Depth::Ansi16
     } else {
         Depth::Ansi256
@@ -92,6 +107,8 @@ fn depth(var: &impl Fn(&str) -> Option<String>, term: &str) -> Depth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    type Signature = (&'static str, &'static [(&'static str, &'static str)], Depth);
 
     fn caps_for(vars: &[(&str, &str)]) -> Caps {
         detect(|name| vars.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string()))
@@ -109,23 +126,61 @@ mod tests {
     }
 
     #[test]
-    fn modern_terminals_get_truecolor() {
-        assert_eq!(caps_for(&[("TERM", "xterm-256color"), ("COLORTERM", "truecolor")]).depth, Depth::TrueColor);
-        assert_eq!(caps_for(&[("WT_SESSION", "x")]).depth, Depth::TrueColor);
-        assert_eq!(caps_for(&[("TERM", "xterm-256color"), ("TERM_PROGRAM", "iTerm.app")]).depth, Depth::TrueColor);
+    fn known_terminal_signatures() {
+        use Depth::*;
+        let windows_default = if cfg!(windows) { TrueColor } else { Ansi16 };
+        let cases: &[Signature] = &[
+            ("Windows Terminal", &[("WT_SESSION", "x")], TrueColor),
+            ("WSL inside Windows Terminal", &[("TERM", "xterm-256color"), ("WT_SESSION", "x")], TrueColor),
+            ("cmd / PowerShell in conhost", &[], windows_default),
+            ("ConEmu / Cmder", &[("ConEmuANSI", "ON")], Ansi256),
+            (
+                "Git Bash / MSYS2 / Cygwin (mintty)",
+                &[("TERM", "xterm-256color"), ("TERM_PROGRAM", "mintty")],
+                TrueColor,
+            ),
+            ("Alacritty", &[("TERM", "alacritty")], TrueColor),
+            ("WezTerm", &[("TERM", "xterm-256color"), ("TERM_PROGRAM", "WezTerm")], TrueColor),
+            ("Tabby", &[("TERM", "xterm-256color"), ("TERM_PROGRAM", "Tabby")], TrueColor),
+            ("Hyper", &[("TERM", "xterm-256color"), ("TERM_PROGRAM", "Hyper")], TrueColor),
+            ("PuTTY", &[("TERM", "xterm")], Ansi256),
+            (
+                "GNOME Terminal / Tilix / Terminator / Xfce (VTE)",
+                &[("TERM", "xterm-256color"), ("VTE_VERSION", "7600")],
+                TrueColor,
+            ),
+            ("old VTE", &[("TERM", "xterm-256color"), ("VTE_VERSION", "3400")], Ansi256),
+            ("Konsole", &[("TERM", "xterm-256color"), ("KONSOLE_VERSION", "240800")], TrueColor),
+            ("Kitty", &[("TERM", "xterm-kitty")], TrueColor),
+            ("Foot", &[("TERM", "foot")], TrueColor),
+            ("Ghostty", &[("TERM", "xterm-ghostty"), ("TERM_PROGRAM", "ghostty")], TrueColor),
+            ("Linux virtual console", &[("TERM", "linux")], Ansi16),
+            ("tmux", &[("TERM", "tmux-256color"), ("TERM_PROGRAM", "tmux")], Ansi256),
+            ("tmux passing COLORTERM", &[("TERM", "tmux-256color"), ("COLORTERM", "truecolor")], TrueColor),
+            ("GNU Screen", &[("TERM", "screen")], Ansi16),
+            ("GNU Screen 256", &[("TERM", "screen-256color")], Ansi256),
+            ("Zellij", &[("TERM", "xterm-256color"), ("ZELLIJ", "0"), ("COLORTERM", "truecolor")], TrueColor),
+            ("Terminal.app", &[("TERM", "xterm-256color"), ("TERM_PROGRAM", "Apple_Terminal")], Ansi256),
+            ("iTerm2", &[("TERM", "xterm-256color"), ("TERM_PROGRAM", "iTerm.app")], TrueColor),
+            ("Warp", &[("TERM", "xterm-256color"), ("TERM_PROGRAM", "WarpTerminal")], TrueColor),
+            ("dumb", &[("TERM", "dumb")], None),
+        ];
+        for (name, vars, expected) in cases {
+            assert_eq!(caps_for(vars).depth, *expected, "{name}");
+        }
     }
 
     #[test]
     fn multiplexers_and_plain_xterm_get_256_colors() {
         assert_eq!(caps_for(&[("TERM", "tmux-256color")]).depth, Depth::Ansi256);
-        assert_eq!(caps_for(&[("TERM", "screen")]).depth, Depth::Ansi256);
+        assert_eq!(caps_for(&[("TERM", "xterm")]).depth, Depth::Ansi256);
     }
 
     #[test]
-    fn linux_console_gets_16_colors_and_ascii() {
-        let caps = caps_for(&[("TERM", "linux")]);
-        assert_eq!(caps.depth, Depth::Ansi16);
-        assert_eq!(caps.glyphs.fill, '=');
+    fn cjk_locales_avoid_ambiguous_width_glyphs() {
+        assert_eq!(caps_for(&[("LANG", "ja_JP.UTF-8")]).glyphs.fill, '=');
+        assert_eq!(caps_for(&[("LC_ALL", "zh_CN.UTF-8"), ("LANG", "en_US.UTF-8")]).glyphs.fill, '=');
+        assert_eq!(caps_for(&[("LANG", "pt_BR.UTF-8")]).glyphs.fill, '━');
     }
 
     #[test]

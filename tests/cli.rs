@@ -58,6 +58,9 @@ fn run_with(temp: &TempDir, input: &str, columns: Option<usize>, vars: &[(&str, 
         .env_remove("STATUS_CLI_ASCII")
         .env_remove("NO_COLOR")
         .env_remove("TERM")
+        .env_remove("LANG")
+        .env_remove("LC_ALL")
+        .env_remove("LC_CTYPE")
         .envs(vars.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
