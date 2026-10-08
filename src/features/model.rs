@@ -1,40 +1,31 @@
 use crate::payload::{Host, Payload};
 use crate::style::{SOFT, STRONG, capitalize, heat, paint};
 
+const EFFORT_HEAT: f64 = 65.0;
+
 pub struct Model {
     name: String,
-    effort: Option<Effort>,
+    effort: Option<String>,
     fast: bool,
 }
 
-struct Effort {
-    name: String,
-    heat: f64,
-}
-
 pub fn read(payload: &Payload) -> Option<Model> {
-    let name = payload.model.as_ref()?.display_name.as_deref()?.split_whitespace().next()?.to_owned();
-    let effort = match payload.host() {
-        Host::Claude => payload.effort.as_ref().map(|e| claude_effort(&e.level)),
-        Host::Agy => payload.execution_mode.as_deref().map(agy_mode),
+    let name = short_name(payload.model.as_ref()?.display_name.as_deref()?)?;
+    let level = match payload.host() {
+        Host::Claude => payload.effort.as_ref().map(|e| e.level.as_str()),
+        Host::Agy => payload.execution_mode.as_deref(),
     };
+    let effort = level.map(str::trim).filter(|l| !l.is_empty()).map(capitalize);
     Some(Model { name, effort, fast: payload.fast_mode == Some(true) })
 }
 
-fn claude_effort(level: &str) -> Effort {
-    let (name, heat) = match level {
-        "low" => ("Low", 10.0),
-        "medium" => ("Medium", 40.0),
-        "high" => ("High", 65.0),
-        "xhigh" => ("XHigh", 80.0),
-        "max" => ("Max", 95.0),
-        other => return Effort { name: capitalize(other), heat: 40.0 },
-    };
-    Effort { name: name.to_owned(), heat }
-}
-
-fn agy_mode(mode: &str) -> Effort {
-    Effort { name: capitalize(mode), heat: if mode == "fast" { 25.0 } else { 65.0 } }
+fn short_name(display_name: &str) -> Option<String> {
+    let words: Vec<&str> = display_name
+        .split_whitespace()
+        .take_while(|word| !word.starts_with('('))
+        .filter(|word| !word.starts_with(|c: char| c.is_ascii_digit()))
+        .collect();
+    (!words.is_empty()).then(|| words.join(" "))
 }
 
 impl Model {
@@ -42,7 +33,7 @@ impl Model {
         let mut out = paint(STRONG, &self.name);
         if let Some(effort) = &self.effort {
             out += &paint(SOFT, " - ");
-            out += &paint(heat(effort.heat), &effort.name);
+            out += &paint(heat(EFFORT_HEAT), effort);
         }
         if self.fast {
             out += &paint(SOFT, " · ");
@@ -65,7 +56,7 @@ mod tests {
     #[test]
     fn claude_shows_first_word_and_effort() {
         let json = r#"{"model":{"display_name":"Opus 5.5"},"effort":{"level":"xhigh"}}"#;
-        assert_eq!(line(json).as_deref(), Some("Opus - XHigh"));
+        assert_eq!(line(json).as_deref(), Some("Opus - Xhigh"));
     }
 
     #[test]
@@ -78,6 +69,25 @@ mod tests {
     fn fast_mode_adds_a_badge() {
         let json = r#"{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"fast_mode":true}"#;
         assert_eq!(line(json).as_deref(), Some("Opus - High · fast"));
+    }
+
+    #[test]
+    fn short_name_keeps_the_family_without_versions() {
+        for (display, short) in [
+            ("Opus 5.5", "Opus"),
+            ("Opus 4.6 (1M context)", "Opus"),
+            ("Sonnet 5.5", "Sonnet"),
+            ("Haiku 5.5", "Haiku"),
+            ("Fable 5.1", "Fable"),
+            ("Claude Sonnet 4.5", "Claude Sonnet"),
+            ("Claude", "Claude"),
+            ("Gemini 3 Pro", "Gemini Pro"),
+            ("Gemini 3 Flash", "Gemini Flash"),
+            ("GPT-OSS 120B", "GPT-OSS"),
+        ] {
+            assert_eq!(short_name(display).as_deref(), Some(short), "{display}");
+        }
+        assert_eq!(short_name("4.5"), None);
     }
 
     #[test]
