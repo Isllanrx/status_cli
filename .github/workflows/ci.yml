@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -33,13 +33,18 @@ jobs:
   build:
     needs: test
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, bin: status_cli }
-          - { os: macos-latest, target: aarch64-apple-darwin, bin: status_cli }
-          - { os: macos-latest, target: x86_64-apple-darwin, bin: status_cli }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, bin: status_cli }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, bin: status_cli }
+          - { os: macos-15-intel, target: x86_64-apple-darwin, bin: status_cli, macos: "10.12" }
+          - { os: macos-latest, target: aarch64-apple-darwin, bin: status_cli, macos: "11.0" }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, bin: status_cli.exe }
+          - { os: windows-latest, target: aarch64-pc-windows-msvc, bin: status_cli.exe }
     runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -47,14 +52,132 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked --target ${{ matrix.target }}
+      - if: runner.os == 'macOS'
+        run: |
+          otool -l target/${{ matrix.target }}/release/status_cli | grep -E 'minos|version' | head -2
+          codesign --verify target/${{ matrix.target }}/release/status_cli
       - uses: actions/upload-artifact@v4
         with:
           name: status_cli-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ matrix.bin }}
 
+  macos-universal:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: status_cli-*-apple-darwin
+      - run: |
+          lipo -create -output status_cli status_cli-x86_64-apple-darwin/status_cli status_cli-aarch64-apple-darwin/status_cli
+          codesign --force --sign - status_cli
+          codesign --verify status_cli
+          lipo -archs status_cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: status_cli-universal-apple-darwin
+          path: status_cli
+
+  shells:
+    needs: macos-universal
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, artifact: status_cli-x86_64-unknown-linux-musl }
+          - { os: ubuntu-24.04-arm, artifact: status_cli-aarch64-unknown-linux-musl }
+          - { os: macos-latest, artifact: status_cli-universal-apple-darwin }
+          - { os: macos-15-intel, artifact: status_cli-universal-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: ${{ matrix.artifact }}
+          path: bin
+      - run: chmod +x bin/status_cli && echo "$PWD/bin" >> "$GITHUB_PATH"
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish ksh tcsh dash
+      - if: runner.os == 'macOS'
+        run: brew install fish nushell >/dev/null
+      - run: |
+          printf '{"session_id":"ci","model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"rate_limits":{"five_hour":{"used_percentage":72,"resets_at":%s}},"cost":{"total_duration_ms":60000}}' $(( $(date +%s) + 5400 )) > payload.json
+          failed=0
+          for sh in sh dash bash zsh ksh tcsh fish; do
+            command -v "$sh" >/dev/null || { echo "skip $sh"; continue; }
+            out=$(COLUMNS=150 "$sh" -c 'status_cli < payload.json')
+            case "$out" in *"Opus - High"*sessão*tempo*) echo "ok $sh" ;; *) echo "FAIL $sh: $out"; failed=1 ;; esac
+          done
+          if command -v nu >/dev/null; then
+            out=$(nu -c 'open --raw payload.json | status_cli')
+            case "$out" in *"Opus - High"*) echo "ok nu" ;; *) echo "FAIL nu: $out"; failed=1 ;; esac
+          fi
+          exit $failed
+
+  shells-windows:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, artifact: status_cli-x86_64-pc-windows-msvc }
+          - { os: windows-11-arm, artifact: status_cli-aarch64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: ${{ matrix.artifact }}
+          path: bin
+      - shell: pwsh
+        run: |
+          $env:PATH = "$PWD\bin;$env:PATH"
+          $env:COLUMNS = '150'
+          $json = '{"session_id":"ci","model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"cost":{"total_duration_ms":60000}}'
+          [IO.File]::WriteAllText("$PWD\payload.json", $json)
+          $runs = [ordered]@{
+            'cmd'            = { cmd /c "status_cli < payload.json" }
+            'powershell 5.1' = { powershell -NoProfile -Command "Get-Content payload.json -Raw | status_cli" }
+            'pwsh 7'         = { pwsh -NoProfile -Command "Get-Content payload.json -Raw | status_cli" }
+            'git bash'       = { & "$env:ProgramFiles\Git\bin\bash.exe" -c "status_cli < payload.json" }
+          }
+          $failed = $false
+          foreach ($name in $runs.Keys) {
+            $out = (& $runs[$name]) -join ''
+            if ($out -match 'Opus - High' -and $out -match 'tempo') { "ok $name" } else { "FAIL ${name}: $out"; $failed = $true }
+          }
+          if ($failed) { exit 1 }
+
+  distros:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - ubuntu:20.04
+          - ubuntu:24.04
+          - debian:11
+          - debian:12
+          - archlinux:latest
+          - fedora:latest
+          - alpine:latest
+          - opensuse/tumbleweed:latest
+          - rockylinux:9
+          - amazonlinux:2023
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: status_cli-x86_64-unknown-linux-musl
+          path: bin
+      - run: |
+          chmod +x bin/status_cli
+          printf '{"session_id":"ci","model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"cost":{"total_duration_ms":60000}}' > bin/payload.json
+          out=$(docker run --rm -e COLUMNS=150 -v "$PWD/bin:/v:ro" "${{ matrix.image }}" sh -c '/v/status_cli < /v/payload.json')
+          echo "$out"
+          case "$out" in *"Opus - High"*tempo*) ;; *) exit 1 ;; esac
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [shells, shells-windows, distros]
     runs-on: ubuntu-latest
     permissions:
       contents: write
