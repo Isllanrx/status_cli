@@ -27,6 +27,7 @@ pub struct Payload {
 pub struct Model {
     pub id: Option<String>,
     pub display_name: Option<String>,
+    pub effort: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -84,6 +85,7 @@ impl Payload {
     pub fn validated(mut self) -> Self {
         if let Some(model) = &mut self.model {
             model.display_name = model.display_name.as_deref().map(clean_text);
+            model.effort = model.effort.as_deref().map(clean_text);
         }
         if let Some(effort) = &mut self.effort {
             effort.level = clean_text(&effort.level);

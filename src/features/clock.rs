@@ -20,19 +20,20 @@ pub fn read(payload: &Payload, session: &mut Session, now: u64) -> Option<u64> {
 }
 
 fn conversation_started(payload: &Payload) -> Option<u64> {
-    let path = match payload.transcript_path.as_deref() {
-        Some(path) => PathBuf::from(path),
-        None => {
-            let id = payload.conversation_id.as_deref().or(payload.session_id.as_deref())?;
-            if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-                return None;
-            }
-            let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
-            PathBuf::from(home).join(".gemini").join("antigravity-cli").join("conversations").join(format!("{id}.db"))
+    let conversation_file = || {
+        let id = payload.conversation_id.as_deref().or(payload.session_id.as_deref())?;
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return None;
         }
+        let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
+        Some(PathBuf::from(home).join(".gemini").join("antigravity-cli").join("conversations").join(format!("{id}.db")))
     };
-    let created = fs::metadata(path).ok()?.created().ok()?;
-    Some(created.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64)
+    [payload.transcript_path.as_deref().map(PathBuf::from), conversation_file()]
+        .into_iter()
+        .flatten()
+        .find_map(|path| fs::metadata(path).ok()?.created().ok())
+        .and_then(|created| created.duration_since(UNIX_EPOCH).ok())
+        .map(|since| since.as_millis() as u64)
 }
 
 pub fn render(ms: u64, frame: &Frame) -> String {

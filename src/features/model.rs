@@ -13,7 +13,7 @@ pub fn read(payload: &Payload) -> Option<Model> {
     let name = short_name(payload.model.as_ref()?.display_name.as_deref()?)?;
     let level = match payload.host() {
         Host::Claude | Host::Codex => payload.effort.as_ref().map(|e| e.level.as_str()),
-        Host::Agy => payload.execution_mode.as_deref(),
+        Host::Agy => payload.model.as_ref().and_then(|m| m.effort.as_deref()).or(payload.execution_mode.as_deref()),
     };
     let effort = level.map(str::trim).filter(|l| !l.is_empty()).map(capitalize);
     Some(Model { name, effort, fast: payload.fast_mode == Some(true) })
@@ -88,6 +88,12 @@ mod tests {
             assert_eq!(short_name(display).as_deref(), Some(short), "{display}");
         }
         assert_eq!(short_name("4.5"), None);
+    }
+
+    #[test]
+    fn agy_reads_effort_from_the_model() {
+        let json = r#"{"product":"antigravity","model":{"display_name":"Gemini 3.8 Flash (High)","effort":"high"}}"#;
+        assert_eq!(line(json).as_deref(), Some("Gemini Flash - High"));
     }
 
     #[test]

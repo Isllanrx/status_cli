@@ -7,6 +7,7 @@ use crate::terminal::caps;
 
 const FIVE_HOURS_MS: u64 = 5 * 3_600_000;
 const SEVEN_DAYS_MS: u64 = 7 * 86_400_000;
+const DAY_MS: u64 = 86_400_000;
 const MIN_ELAPSED_FOR_PROJECTION_MS: u64 = 10 * 60_000;
 const MIN_PCT_FOR_PROJECTION: f64 = 50.0;
 const PROJECTION_MARGIN: f64 = 0.8;
@@ -38,11 +39,28 @@ pub fn read(payload: &Payload, now: u64, session: &mut Session) -> Vec<Quota> {
             ]
         }
         Host::Agy => {
-            let model_id = payload.model.as_ref().and_then(|m| m.id.as_deref()).unwrap_or_default();
-            let current = payload.quota.as_ref().and_then(|q| pick(q, model_id));
-            let pct = current.and_then(|q| q.remaining_fraction).map(|r| (1.0 - r) * 100.0);
-            let resets = current.and_then(|q| q.reset_in_seconds).map(|s| now + (s * 1000.0) as u64);
-            vec![quota("cota", pct, resets, None, true)]
+            let quotas = payload.quota.as_ref();
+            let model = payload
+                .model
+                .as_ref()
+                .map(|m| {
+                    [m.id.as_deref(), m.display_name.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" ")
+                })
+                .unwrap_or_default();
+            let used = |q: &payload::Quota| q.remaining_fraction.map(|r| (1.0 - r) * 100.0);
+            let resets = |q: &payload::Quota| q.reset_in_seconds.map(|s| now + (s * 1000.0) as u64);
+            let windows = quotas.map(|q| family_windows(q, &model)).unwrap_or_default();
+            if windows.is_empty() {
+                let current = quotas.and_then(|q| pick(q, &model));
+                return vec![quota("cota", current.and_then(used), current.and_then(resets), None, true)];
+            }
+            windows
+                .into_iter()
+                .map(|(span, q)| {
+                    let short = span < DAY_MS;
+                    quota(if short { "sessão" } else { "semana" }, used(q), resets(q), Some(span), short)
+                })
+                .collect()
         }
     }
 }
@@ -53,6 +71,37 @@ fn used(window: Option<&payload::Window>) -> Option<f64> {
 
 fn resets_at(window: Option<&payload::Window>) -> Option<u64> {
     window?.resets_at.map(|s| (s * 1000.0) as u64)
+}
+
+fn window_span(window: &str) -> Option<u64> {
+    match window {
+        "weekly" => Some(SEVEN_DAYS_MS),
+        "daily" => Some(DAY_MS),
+        hours => hours.strip_suffix('h')?.parse::<u64>().ok().map(|h| h * 3_600_000),
+    }
+}
+
+fn family_windows<'a>(quotas: &'a BTreeMap<String, payload::Quota>, model: &str) -> Vec<(u64, &'a payload::Quota)> {
+    let entries: Vec<(&str, u64, &payload::Quota)> = quotas
+        .iter()
+        .filter_map(|(key, q)| {
+            let (family, window) = key.rsplit_once('-')?;
+            Some((family, window_span(window)?, q))
+        })
+        .collect();
+    let model = model.to_ascii_lowercase();
+    let families = || entries.iter().map(|(family, ..)| *family);
+    let Some(family) = families()
+        .find(|family| model.contains(&family.to_ascii_lowercase()))
+        .or_else(|| families().find(|family| !family.chars().all(|c| c.is_ascii_alphabetic())))
+        .or_else(|| families().next())
+    else {
+        return Vec::new();
+    };
+    let mut windows: Vec<(u64, &payload::Quota)> =
+        entries.into_iter().filter(|(f, ..)| *f == family).map(|(_, span, q)| (span, q)).collect();
+    windows.sort_by_key(|(span, _)| *span);
+    windows
 }
 
 fn pick<'a>(quotas: &'a BTreeMap<String, payload::Quota>, model_id: &str) -> Option<&'a payload::Quota> {
@@ -156,6 +205,24 @@ mod tests {
         let json = r#"{"product":"antigravity","model":{"id":"gemini-3-pro"},
             "quota":{"flash":{"remaining_fraction":0.1},"gemini-3-pro":{"remaining_fraction":0.75,"reset_in_seconds":120}}}"#;
         assert_eq!(lines(json, false), ["cota 25% ↻ 2m"]);
+    }
+
+    const AGY_QUOTA: &str = r#""quota":{"3p-5h":{"remaining_fraction":1,"reset_in_seconds":18001},
+        "3p-weekly":{"remaining_fraction":0.0004,"reset_in_seconds":204931},
+        "gemini-5h":{"remaining_fraction":0.9989992,"reset_in_seconds":17279},
+        "gemini-weekly":{"remaining_fraction":0.0058754333,"reset_in_seconds":194772}}"#;
+
+    #[test]
+    fn agy_shows_both_windows_of_the_current_model_family() {
+        let json =
+            format!(r#"{{"product":"antigravity","model":{{"display_name":"Gemini 3.8 Flash (High)"}},{AGY_QUOTA}}}"#);
+        assert_eq!(lines(&json, false), ["sessão 0% ↻ 4h47m", "semana 99% ⇥ 40m"]);
+    }
+
+    #[test]
+    fn agy_third_party_models_use_the_non_product_family() {
+        let json = format!(r#"{{"product":"antigravity","model":{{"display_name":"Claude Sonnet 4.6"}},{AGY_QUOTA}}}"#);
+        assert_eq!(lines(&json, false), ["sessão 0% ↻ 5h00m", "semana 100% ⇥ 2m"]);
     }
 
     #[test]
