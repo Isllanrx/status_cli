@@ -1,5 +1,9 @@
 # status_cli
 
+[![CI](https://github.com/Isllanrx/status_cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Isllanrx/status_cli/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Isllanrx/status_cli)](https://github.com/Isllanrx/status_cli/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A status line for [Claude Code](https://code.claude.com/docs/en/statusline) and the
 [Antigravity CLI](https://www.antigravity.google/docs/cli/statusline) (`agy`). It shows how much of your usage
 limits you have spent, how close the conversation is to auto-compact and how long the session has been running,
@@ -34,6 +38,9 @@ afterwards.
 To install by hand, download the binary for your platform from the
 [latest release](https://github.com/Isllanrx/status_cli/releases/latest), put it on `PATH` as `status_cli` and run
 `status_cli setup`.
+
+To update, run the same command again. To remove, delete the binary and the `statusLine` entry from the host
+settings, or restore the `.bak-status_cli` copy.
 
 ## What it shows
 
@@ -103,6 +110,9 @@ cargo test
 Each feature in `src/features/` owns its parsing, rendering and tests. Shared code lives in `payload`, `state`,
 `style`, `terminal` and `layout`.
 
+Releases are automatic. Bump `version` in `Cargo.toml` and merge to `main`: once every test, shell and distro check
+passes, CI tags the commit, publishes the binaries with `SHA256SUMS` and runs the installers against them.
+
 ## License
 
-MIT
+[MIT](LICENSE)
