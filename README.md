@@ -14,7 +14,7 @@ A status line for [Claude Code](https://code.claude.com/docs/en/statusline), the
 conversation is to auto-compact and how long the session has been running, right-aligned at the bottom of the
 terminal.
 
-![status_cli in a terminal: model and effort, session and weekly usage bars, auto-compact progress and session clock](assets/interface.png)
+![status_cli in Codex, Claude Code and the Antigravity CLI: model and effort, session and weekly usage bars, context or auto-compact progress and session clock](assets/cli.png)
 
 One binary written in Rust, statically linked on Linux. It needs no runtime, makes no network calls and spends
 well under a millisecond of its own work per refresh.
