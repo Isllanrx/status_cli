@@ -2,6 +2,7 @@ mod common;
 
 use common::*;
 use serde_json::Value;
+use std::fs;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -72,4 +73,42 @@ fn unknown_sessions_and_bad_input_stay_silent() {
     assert_eq!(guard(&temp, "claude", r#"{"session_id":"none","hook_event_name":"UserPromptSubmit"}"#), "");
     assert_eq!(guard(&temp, "claude", "not json"), "");
     assert_eq!(guard(&temp, "agy", "not json"), "{}");
+}
+
+#[test]
+fn setup_registers_the_guard_in_every_host_and_keeps_other_hooks() {
+    let temp = TempDir::new();
+    let claude = temp.0.join(".claude");
+    let codex = temp.0.join(".codex");
+    fs::create_dir_all(&claude).unwrap();
+    fs::create_dir_all(&codex).unwrap();
+    fs::create_dir_all(temp.0.join(".gemini").join("antigravity-cli")).unwrap();
+    fs::write(
+        codex.join("hooks.json"),
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"rtk"}]}]}}"#,
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_status_cli"))
+        .arg("setup")
+        .env("HOME", &temp.0)
+        .env("USERPROFILE", &temp.0)
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("CODEX_HOME")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("/hooks in Codex"), "{stdout}");
+    let read =
+        |path: std::path::PathBuf| -> Value { serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap() };
+    let settings = read(claude.join("settings.json"));
+    let command = settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"].as_str().unwrap();
+    assert!(command.ends_with("guard claude"), "{command}");
+    assert_eq!(settings["hooks"]["PreToolUse"][0]["matcher"], "Agent|Task|Workflow");
+    let codex_hooks = read(codex.join("hooks.json"));
+    assert_eq!(codex_hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "rtk");
+    assert!(codex_hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"].as_str().unwrap().ends_with("guard codex"));
+    let plugin = temp.0.join(".gemini").join("config").join("plugins").join("status_cli");
+    assert_eq!(read(plugin.join("plugin.json"))["name"], "status_cli");
+    assert!(read(plugin.join("hooks.json"))["status_cli-guard"]["PreInvocation"].is_array());
 }

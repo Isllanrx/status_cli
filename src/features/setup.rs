@@ -6,18 +6,23 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value, json};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
+use crate::features::hooks::{self, Event};
+
 pub const CODEX_ALIAS: &str = "codex-stt";
 const CODEX_STATUS_ITEMS: [&str; 4] = ["model-with-reasoning", "five-hour-limit", "weekly-limit", "context-used"];
 
 enum Config {
-    Json(Value),
+    Json { status_line: Option<Value>, guard: Option<(&'static [Event], &'static str)> },
     CodexToml,
+    AgyPlugin,
 }
 
 struct Host {
     name: &'static str,
     settings: PathBuf,
+    installed: PathBuf,
     config: Config,
+    note: Option<&'static str>,
 }
 
 pub fn run() -> Vec<Result<String, String>> {
@@ -27,12 +32,16 @@ pub fn run() -> Vec<Result<String, String>> {
     let mut outcomes: Vec<Result<String, String>> = hosts(&home)
         .into_iter()
         .map(|host| {
-            let outcome = match host.settings.parent() {
-                Some(dir) if dir.is_dir() => configure(&host).map(|backup| match backup {
-                    Some(backup) => format!("configured (backup: {})", backup.display()),
-                    None => "configured".to_owned(),
-                }),
-                _ => Ok("not installed, skipped".to_owned()),
+            let outcome = if host.installed.is_dir() {
+                configure(&host).map(|backup| {
+                    let note = host.note.map(|note| format!("; {note}")).unwrap_or_default();
+                    match backup {
+                        Some(backup) => format!("configured (backup: {}){note}", backup.display()),
+                        None => format!("configured{note}"),
+                    }
+                })
+            } else {
+                Ok("not installed, skipped".to_owned())
             };
             match outcome {
                 Ok(message) => Ok(format!("{}: {message} -> {}", host.name, host.settings.display())),
@@ -99,12 +108,14 @@ pub fn doctor() -> (Vec<String>, bool) {
     };
     let mut configured = 0;
     for host in hosts(&home) {
-        let marker = match host.config {
-            Config::Json(_) => "status_cli",
-            Config::CodexToml => "status_line",
-        };
-        let installed = host.settings.parent().is_some_and(Path::is_dir);
-        let ready = fs::read_to_string(&host.settings).is_ok_and(|text| text.contains(marker));
+        let installed = host.installed.is_dir();
+        let ready = fs::read_to_string(&host.settings).is_ok_and(|text| match &host.config {
+            Config::Json { status_line, guard } => {
+                (status_line.is_none() || text.contains("status_cli")) && (guard.is_none() || hooks::is_guard(&text))
+            }
+            Config::CodexToml => text.contains("status_line"),
+            Config::AgyPlugin => hooks::is_guard(&text),
+        });
         lines.push(match (installed, ready) {
             (false, _) => format!("skip    {} is not installed", host.name),
             (true, true) => {
@@ -139,24 +150,53 @@ pub fn doctor() -> (Vec<String>, bool) {
     (lines, healthy)
 }
 
-fn hosts(home: &Path) -> [Host; 3] {
+fn hosts(home: &Path) -> [Host; 5] {
     let command = command();
     let config_dir = |var: &str, default: PathBuf| env::var_os(var).map_or(default, PathBuf::from);
+    let claude = config_dir("CLAUDE_CONFIG_DIR", home.join(".claude"));
+    let agy = home.join(".gemini").join("antigravity-cli");
+    let codex = config_dir("CODEX_HOME", home.join(".codex"));
     [
         Host {
             name: "Claude Code",
-            settings: config_dir("CLAUDE_CONFIG_DIR", home.join(".claude")).join("settings.json"),
-            config: Config::Json(json!({ "type": "command", "command": command, "refreshInterval": 1 })),
+            settings: claude.join("settings.json"),
+            installed: claude,
+            config: Config::Json {
+                status_line: Some(json!({ "type": "command", "command": command, "refreshInterval": 1 })),
+                guard: Some((hooks::CLAUDE_EVENTS, "claude")),
+            },
+            note: None,
         },
         Host {
             name: "Antigravity CLI",
-            settings: home.join(".gemini").join("antigravity-cli").join("settings.json"),
-            config: Config::Json(json!({ "type": "command", "command": command, "enabled": true })),
+            settings: agy.join("settings.json"),
+            installed: agy.clone(),
+            config: Config::Json {
+                status_line: Some(json!({ "type": "command", "command": command, "enabled": true })),
+                guard: None,
+            },
+            note: None,
+        },
+        Host {
+            name: "Antigravity CLI usage guard",
+            settings: home.join(".gemini").join("config").join("plugins").join(hooks::AGY_PLUGIN).join("hooks.json"),
+            installed: agy,
+            config: Config::AgyPlugin,
+            note: None,
         },
         Host {
             name: "Codex CLI",
-            settings: config_dir("CODEX_HOME", home.join(".codex")).join("config.toml"),
+            settings: codex.join("config.toml"),
+            installed: codex.clone(),
             config: Config::CodexToml,
+            note: None,
+        },
+        Host {
+            name: "Codex CLI usage guard",
+            settings: codex.join("hooks.json"),
+            installed: codex,
+            config: Config::Json { status_line: None, guard: Some((hooks::CODEX_EVENTS, "codex")) },
+            note: Some("trust the new hooks once with /hooks in Codex"),
         },
     ]
 }
@@ -184,8 +224,15 @@ fn configure(host: &Host) -> Result<Option<PathBuf>, Box<dyn Error>> {
     };
     let text = existing.as_deref().map(|bytes| bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes));
     let updated = match &host.config {
-        Config::Json(status_line) => merge_json(text, status_line)?,
+        Config::Json { status_line, guard } => merge_json(text, status_line.as_ref(), *guard)?,
         Config::CodexToml => merge_codex(text.map(std::str::from_utf8).transpose()?.unwrap_or_default())?,
+        Config::AgyPlugin => {
+            let (manifest, hooks) = hooks::agy_plugin(&hooks::command(&command(), "agy"));
+            let dir = host.settings.parent().ok_or("plugin directory not found")?;
+            fs::create_dir_all(dir)?;
+            fs::write(dir.join("plugin.json"), manifest)?;
+            hooks
+        }
     };
     let backup = match existing {
         Some(bytes) => {
@@ -201,20 +248,30 @@ fn configure(host: &Host) -> Result<Option<PathBuf>, Box<dyn Error>> {
     Ok(backup)
 }
 
-fn merge_json(existing: Option<&[u8]>, wanted: &Value) -> Result<String, Box<dyn Error>> {
+fn merge_json(
+    existing: Option<&[u8]>,
+    wanted: Option<&Value>,
+    guard: Option<(&[Event], &str)>,
+) -> Result<String, Box<dyn Error>> {
     let mut settings = match existing.map(serde_json::from_slice).transpose()? {
         Some(Value::Object(map)) => map,
         Some(_) => return Err("settings file is not a JSON object".into()),
         None => Map::new(),
     };
-    let mut status_line = match settings.remove("statusLine") {
-        Some(Value::Object(map)) => map,
-        _ => Map::new(),
-    };
-    if let Value::Object(wanted) = wanted {
+    if let Some(Value::Object(wanted)) = wanted {
+        let mut status_line = match settings.remove("statusLine") {
+            Some(Value::Object(map)) => map,
+            _ => Map::new(),
+        };
         status_line.extend(wanted.clone());
+        settings.insert("statusLine".to_owned(), Value::Object(status_line));
     }
-    settings.insert("statusLine".to_owned(), Value::Object(status_line));
+    if let Some((events, host)) = guard {
+        let Value::Object(map) = settings.entry("hooks").or_insert_with(|| json!({})) else {
+            return Err("\"hooks\" in the settings file is not a JSON object".into());
+        };
+        hooks::merge(map, events, &hooks::command(&command(), host));
+    }
     Ok(serde_json::to_string_pretty(&Value::Object(settings))? + "\n")
 }
 
