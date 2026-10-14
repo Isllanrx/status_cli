@@ -6,6 +6,7 @@ use std::time::UNIX_EPOCH;
 
 use crate::i18n::labels;
 use crate::payload::{Host, Payload};
+use crate::process;
 use crate::state::Session;
 use crate::style::{Frame, LABEL, SOFT, STRONG, TRACK, paint};
 use crate::terminal::caps;
@@ -16,7 +17,9 @@ pub fn read(payload: &Payload, session: &mut Session, now: u64) -> Option<u64> {
         Host::Claude | Host::Codex => payload.cost.as_ref()?.total_duration_ms?,
         Host::Agy => {
             payload.session_key()?;
-            conversation_started(payload).map_or(0, |started| now.saturating_sub(started))
+            process::ancestor_started("agy", now)
+                .or_else(|| conversation_started(payload))
+                .map_or(0, |started| now.saturating_sub(started))
         }
     };
     Some(session.elapsed(base_ms))

@@ -2,6 +2,7 @@ mod features;
 mod i18n;
 mod layout;
 mod payload;
+mod process;
 mod state;
 mod style;
 mod terminal;
