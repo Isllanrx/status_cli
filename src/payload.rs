@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use crate::time::parse_utc_millis;
+
 pub const MAX_COLUMNS: usize = 1000;
 const MAX_TEXT_CHARS: usize = 48;
 const MAX_KEY_CHARS: usize = 128;
@@ -52,6 +54,19 @@ pub struct Quota {
     pub remaining_fraction: Option<f64>,
     pub reset_time: Option<String>,
     pub reset_in_seconds: Option<f64>,
+}
+
+impl Quota {
+    pub fn used(&self) -> Option<f64> {
+        self.remaining_fraction.map(|r| (1.0 - r) * 100.0)
+    }
+
+    pub fn resets_at(&self, now: u64) -> Option<u64> {
+        self.reset_time
+            .as_deref()
+            .and_then(parse_utc_millis)
+            .or_else(|| self.reset_in_seconds.map(|s| now + (s * 1000.0) as u64))
+    }
 }
 
 #[derive(Clone, Default, Deserialize)]

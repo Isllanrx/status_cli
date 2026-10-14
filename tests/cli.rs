@@ -27,7 +27,25 @@ fn each_session_keeps_its_own_clock() {
     let temp = TempDir::new();
     assert_clock(&run(&temp, &claude("a", 60_000), Some(160)).text, "00:01");
     assert_clock(&run(&temp, &claude("b", 7_200_000), Some(160)).text, "02:00");
-    assert_eq!(temp.cache_files(), ["status_cli-a", "status_cli-b"]);
+    assert_eq!(temp.cache_files(), ["status_cli-a", "status_cli-b", "usage-claude.json"]);
+}
+
+#[test]
+fn every_terminal_shows_the_latest_shared_usage() {
+    let temp = TempDir::new();
+    let resets = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 3_600;
+    let payload = |session: &str, used: u32| {
+        format!(
+            r#"{{"session_id":"{session}","rate_limits":{{"five_hour":{{"used_percentage":{used},"resets_at":{resets}}},
+                "seven_day":{{"used_percentage":{used},"resets_at":{}}}}}}}"#,
+            resets + 86_400
+        )
+    };
+    run(&temp, &payload("busy", 15), Some(160));
+    let idle = run(&temp, &payload("idle", 10), Some(160)).text;
+    assert!(idle.contains(" 15% ↻ ") && !idle.contains(" 10%"), "{idle:?}");
+    let new = run(&temp, r#"{"session_id":"new"}"#, Some(160)).text;
+    assert!(new.contains(" 15% ↻ "), "{new:?}");
 }
 
 #[test]
@@ -78,7 +96,7 @@ fn agy_line_uses_quota_mode_and_terminal_width() {
     assert!(out.text.contains(" 25% ↻"), "{:?}", out.text);
     assert!(out.text.contains("contexto ━━━━──────"), "{:?}", out.text);
     assert_clock(&out.text, "00:00");
-    assert_eq!(temp.cache_files(), ["status_cli-agy-conv-1"]);
+    assert_eq!(temp.cache_files(), ["status_cli-agy-conv-1", "usage-agy.json"]);
 }
 
 #[test]

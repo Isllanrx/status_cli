@@ -16,7 +16,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use features::telemetry::{self, Event, Timer};
-use features::{clock, codex, context, guard, model, quota, setup, wrap};
+use features::{clock, codex, context, guard, model, quota, setup, usage, wrap};
 use layout::Line;
 use payload::Payload;
 use state::Session;
@@ -184,6 +184,7 @@ fn parse(input: &[u8]) -> Result<Payload, Box<dyn Error>> {
 }
 
 fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
+    let payload = &usage::share(&cache_dir(), payload, now);
     Line {
         model: model::read(payload),
         quotas: quota::read(payload, now, session),
