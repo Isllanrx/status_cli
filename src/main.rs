@@ -1,11 +1,10 @@
-mod features;
+mod codex;
 mod i18n;
-mod layout;
-mod payload;
-mod state;
-mod style;
-mod terminal;
-mod time;
+mod install;
+mod render;
+mod shared;
+mod statusline;
+mod usage;
 
 use std::env;
 use std::error::Error;
@@ -14,11 +13,15 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use features::telemetry::{self, Event, Timer};
-use features::{clock, codex, context, guard, model, quota, setup, wrap};
-use layout::Line;
-use payload::Payload;
-use state::Session;
+use codex::wrap;
+use install::{setup, update};
+use render::style;
+use shared::payload::{self, Payload};
+use shared::state::Session;
+use shared::telemetry::{self, Event, Timer};
+use statusline::layout::Line;
+use statusline::{clock, context, model, quota};
+use usage::guard;
 
 const MAX_INPUT_BYTES: u64 = 1 << 20;
 const PAD_CHARS: [char; 2] = ['\u{2800}', ' '];
@@ -37,7 +40,7 @@ fn main() {
             lines.iter().for_each(|line| println!("{line}"));
             std::process::exit(if healthy { 0 } else { 1 });
         }
-        Some("update") => match features::update::run() {
+        Some("update") => match update::run() {
             Ok(message) => return println!("{message}"),
             Err(err) => {
                 eprintln!("status_cli: {err}");
@@ -183,6 +186,7 @@ fn parse(input: &[u8]) -> Result<Payload, Box<dyn Error>> {
 }
 
 fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
+    let payload = &usage::share(&cache_dir(), payload, now);
     Line {
         model: model::read(payload),
         quotas: quota::read(payload, now, session),

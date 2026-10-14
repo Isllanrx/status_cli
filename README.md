@@ -79,9 +79,12 @@ second, through Git Bash or PowerShell on Windows. A `statusLine` in a project's
 precedence over it. Outside fullscreen mode Claude Code shows notifications on the right of the same row, where they
 can cover the end of the line. `subagentStatusLine` uses a different contract and is not supported.
 
-**agy** runs it from `statusLine` in `~/.gemini/antigravity-cli/settings.json`. agy only refreshes the line when
-the agent changes state, so the clock moves with activity rather than every second; it counts from the first entry
-of the conversation transcript.
+**agy** runs it from `statusLine` in `~/.gemini/antigravity-cli/settings.json`. The clock counts from when the
+`agy` window opened: status_cli walks up its parent processes to `agy` and reads that process's start time (Toolhelp
+on Windows, `ps` on Linux and macOS). If `agy` isn't among its parents, it counts from the conversation's first
+transcript entry instead. agy only runs the command when the agent changes state and has no refresh interval, so while
+the agent sits idle the line keeps the last value it drew. Idle time is not lost: the next refresh shows the full
+time since the window opened.
 
 **Codex CLI** cannot run an external status line, so status_cli starts Codex for you. Use `codex-stt` wherever
 you would type `codex`; arguments pass through unchanged:
@@ -100,7 +103,10 @@ last row of the same terminal:
 - Codex's scroll regions are kept off the reserved row, also across alternate-screen switches;
 - the data comes from the session this launch started in the current folder (resumed sessions included, sub-agents
   ignored), with limits matched by window length and context computed the way Codex shows it; until Codex writes
-  that session, the line shows the configured model and the account's latest limits;
+  that session, the line shows the configured model and the account's latest limits. Among several `codex-stt`
+  launches in the same folder, each one prefers a session created after it started, so two windows don't share a
+  session. The clock counts from the later of Codex's session start and the launch, so `codex resume` counts this
+  window, not the original session;
 - Codex's exit code is returned and the terminal modes are restored even if it crashes.
 
 `status_cli codex --once` prints the line once for tmux status bars or shell prompts. Setup also enables Codex's
@@ -115,7 +121,14 @@ native status line in `config.toml`, keeping comments and other settings, for wh
 | `semana` | Weekly usage window, same markers |
 | `compactar` | Claude Code only: how far the context is from auto-compact |
 | `contexto` | agy and Codex: share of the context window in use |
-| `tempo` | Session duration |
+| `tempo` | Time since the session's window opened |
+
+Each host reports usage from its own last API response, so a terminal that has been idle for a while would show an
+older percentage than one in use. status_cli keeps the latest reading of each window in a shared file per host and
+account (`usage-claude.json`, `usage-codex.json`, `usage-agy.json` in the cache folder; `CLAUDE_CONFIG_DIR` and
+`CODEX_HOME` get their own file). Within a window, usage only goes up, so the highest reading wins. A reading with a
+later reset time starts a new window, and expired windows are dropped. Every open terminal then shows the same value,
+and a new session shows it before its first response.
 
 Model names and effort levels come straight from the host, so new models need no update. On agy the windows are
 those of the current model's family (`gemini-5h` and `gemini-weekly` for Gemini, `3p-…` for third-party models).
@@ -226,13 +239,26 @@ cargo test
 cargo llvm-cov --summary-only
 ```
 
-The suite has unit tests beside each module and integration tests in `tests/`: `cli` (rendering), `matrix` (every
-model, effort and mode), `i18n` (every language), `setup`, `guard` (usage hooks and their registration), `codex`, `wrap` (Codex inside a real pseudo-terminal),
-`regression` (one test per fixed bug) and `e2e` (install, configure, then run the configured command through the
-host's shell). CI runs them on every platform and reports coverage.
+The code is split by slice, and each slice owns its parsing, rendering and tests:
 
-Each feature in `src/features/` owns its parsing, rendering and tests; `payload`, `state`, `style`, `terminal` and
-`layout` are shared. Releases are automatic. Every push to `main` that changes `src/`, `Cargo.toml` or `Cargo.lock`
+| Folder | Contents |
+|---|---|
+| `src/statusline/` | Line segments (`model`, `context`, `quota`, `clock`) and the width-based `layout` |
+| `src/statusline/clock/` | Session clock and the process lookup that dates the agy window |
+| `src/codex/` | Codex rollout reader; `wrap/` runs Codex inside a pseudo-terminal |
+| `src/usage/` | Usage shared across terminals and the `guard` hook |
+| `src/install/` | `setup`, `doctor`, host hooks and `update` |
+| `src/shared/` | Host payload, session state, time parsing and telemetry |
+| `src/render/` | Colors, gauges and terminal capabilities |
+| `src/i18n/` | Labels in every language |
+
+The suite has unit tests beside each module and one integration crate per slice in `tests/`, sharing `tests/common/`:
+`statusline` (`cli` rendering, `matrix` with every model, effort and mode, `i18n` with every language, `regression`
+with one test per fixed bug), `codex` (`reader`, and `wrap` with Codex inside a real pseudo-terminal), `install`
+(`setup`, `update`, and `e2e`, which installs, configures and runs the configured command through the host's shell)
+and `usage` (`guard` hooks and their registration). CI runs them on every platform and reports coverage.
+
+Releases are automatic. Every push to `main` that changes `src/`, `Cargo.toml` or `Cargo.lock`
 since the last `vX.Y.Z` tag ships the next minor version: `v1.1.0` becomes `v1.2.0`. CI writes that number into
 `Cargo.toml` and `Cargo.lock` inside the runner before building, so nothing is committed back. The `version` in
 `Cargo.toml` is a floor: raise it by hand for a major or a specific version, and CI uses it when it's higher. Pushes

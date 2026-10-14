@@ -1,6 +1,4 @@
-mod common;
-
-use common::*;
+use crate::common::*;
 
 const LANGUAGES: [(&str, &str, &str, &str); 20] = [
     ("en", "session", "compact", "time"),

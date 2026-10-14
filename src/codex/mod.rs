@@ -1,3 +1,5 @@
+pub mod wrap;
+
 use std::env;
 use std::error::Error;
 use std::fs::{self, File};
@@ -7,8 +9,8 @@ use std::time::SystemTime;
 
 use serde_json::Value;
 
-use crate::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Window};
-use crate::time::parse_utc_millis;
+use crate::shared::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Window};
+use crate::shared::time::parse_utc_millis;
 
 const TAIL_BYTES: u64 = 256 * 1024;
 const RECENT_DAYS: usize = 2;
@@ -25,6 +27,7 @@ pub struct Reader {
     launch: Option<(u64, PathBuf)>,
     pending: Option<Payload>,
     file: Option<PathBuf>,
+    settled: bool,
     scanned_at: u64,
     stamp: Option<(u64, SystemTime)>,
     parsed: Option<(Payload, Option<u64>)>,
@@ -50,12 +53,20 @@ impl Reader {
         let missing = self.file.as_deref().is_none_or(|file| !file.exists());
         let interval = if self.launch.is_some() { LAUNCH_RESCAN_MS } else { RESCAN_MS };
         let due = self.scanned_at == 0 || now.saturating_sub(self.scanned_at) >= interval;
-        if due && (missing || self.launch.is_none()) {
+        if due && (missing || !self.settled || self.launch.is_none()) {
             let sessions = self.home.as_deref().ok_or("Codex home directory not found")?.join("sessions");
-            self.file = match &self.launch {
-                Some((since, cwd)) => launched_session(&sessions, *since, cwd),
+            let file = match &self.launch {
+                Some((since, cwd)) => {
+                    let found = launched_session(&sessions, *since, cwd);
+                    self.settled = found.as_ref().is_some_and(|(_, fresh)| *fresh);
+                    found.map(|(path, _)| path)
+                }
                 None => latest_session(&sessions),
             };
+            if file != self.file {
+                self.parsed = None;
+                self.file = file;
+            }
             self.scanned_at = now;
         }
         let Some(file) = self.file.as_deref() else {
@@ -77,6 +88,8 @@ impl Reader {
         }
         let (payload, started) = self.parsed.as_ref().ok_or("no Codex session found")?;
         let mut payload = payload.clone();
+        let opened = self.launch.as_ref().map(|(since, _)| *since);
+        let started = started.iter().copied().chain(opened).max();
         payload.cost = started.map(|started| Cost { total_duration_ms: Some(now.saturating_sub(started)) });
         Ok(payload)
     }
@@ -235,8 +248,9 @@ fn session_meta(file: &Path) -> Option<Meta> {
     })
 }
 
-fn launched_session(sessions: &Path, since: u64, cwd: &Path) -> Option<PathBuf> {
-    let since = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(since.saturating_sub(LAUNCH_TOLERANCE_MS));
+fn launched_session(sessions: &Path, since: u64, cwd: &Path) -> Option<(PathBuf, bool)> {
+    let since = since.saturating_sub(LAUNCH_TOLERANCE_MS);
+    let since_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(since);
     let children = |dir: &Path| newest_children(dir, usize::MAX);
     children(sessions)
         .iter()
@@ -246,13 +260,15 @@ fn launched_session(sessions: &Path, since: u64, cwd: &Path) -> Option<PathBuf> 
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
         .filter_map(|path| Some((fs::metadata(&path).ok()?.modified().ok()?, path)))
-        .filter(|(modified, _)| *modified >= since)
-        .filter(|(_, path)| {
-            session_meta(path)
-                .is_some_and(|meta| !meta.subagent && meta.cwd.as_deref().is_some_and(|dir| same_dir(dir, cwd)))
+        .filter(|(modified, _)| *modified >= since_time)
+        .filter_map(|(modified, path)| {
+            let meta = session_meta(&path)?;
+            let here = meta.cwd.as_deref().is_some_and(|dir| same_dir(dir, cwd));
+            let fresh = meta.started.is_some_and(|started| started >= since);
+            (here && !meta.subagent).then_some(((fresh, modified), path))
         })
-        .max_by_key(|(modified, _)| *modified)
-        .map(|(_, path)| path)
+        .max_by_key(|(key, _)| *key)
+        .map(|((fresh, _), path)| (path, fresh))
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {

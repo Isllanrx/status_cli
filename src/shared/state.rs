@@ -137,7 +137,7 @@ pub fn read(dir: &Path, key: &str, labels: &[&str]) -> Option<Reading> {
     Some(Reading { pct: trend.to, resets_at: trend.resets_at })
 }
 
-fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
+pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
     let staging = file.with_extension(format!("tmp{}", std::process::id()));
     fs::write(&staging, bytes)?;
     let renamed = fs::rename(&staging, file).or_else(|_| fs::rename(&staging, file));

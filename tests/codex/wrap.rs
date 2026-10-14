@@ -1,11 +1,9 @@
-mod common;
-
 use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use common::*;
+use crate::common::*;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 #[test]

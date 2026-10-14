@@ -1,9 +1,9 @@
-use crate::features::clock;
-use crate::features::context::Context;
-use crate::features::model::Model;
-use crate::features::quota::Quota;
-use crate::style::{Frame, TRACK, paint, truncate_visible, visible_width};
-use crate::terminal::caps;
+use crate::render::style::{Frame, TRACK, paint, truncate_visible, visible_width};
+use crate::render::terminal::caps;
+use crate::statusline::clock;
+use crate::statusline::context::Context;
+use crate::statusline::model::Model;
+use crate::statusline::quota::Quota;
 
 const RIGHT_MARGIN: usize = 8;
 const LAYOUTS: [(usize, bool); 5] = [(10, false), (7, false), (5, false), (0, false), (0, true)];

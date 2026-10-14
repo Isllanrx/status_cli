@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value, json};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
-use crate::features::hooks::{self, Event};
+use crate::install::hooks::{self, Event};
 
 pub const CODEX_ALIAS: &str = "codex-stt";
 const CODEX_STATUS_ITEMS: [&str; 4] = ["model-with-reasoning", "five-hour-limit", "weekly-limit", "context-used"];
@@ -140,7 +140,7 @@ pub fn doctor() -> (Vec<String>, bool) {
     } else {
         format!("info    {CODEX_ALIAS} shortcut is missing; run status_cli setup")
     });
-    let caps = crate::terminal::caps();
+    let caps = crate::render::terminal::caps();
     lines.push(format!(
         "info    terminal: {:?} colors, {} glyphs, language {}",
         caps.depth,

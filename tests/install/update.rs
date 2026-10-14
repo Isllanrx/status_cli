@@ -1,6 +1,4 @@
-mod common;
-
-use common::*;
+use crate::common::*;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
