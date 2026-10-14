@@ -214,6 +214,13 @@ mod tests {
         assert_eq!(lines(json, false), ["cota 25% ↻ 2m"]);
     }
 
+    #[test]
+    fn agy_reads_reset_time_when_seconds_are_missing() {
+        let json = r#"{"product":"antigravity","model":{"id":"gemini-3-pro"},
+            "quota":{"gemini-3-pro":{"remaining_fraction":0.5,"reset_time":"1969-12-31T21:20:00-03:00"}}}"#;
+        assert_eq!(lines(json, false), ["cota 50% ↻ 3m"]);
+    }
+
     const AGY_QUOTA: &str = r#""quota":{"3p-5h":{"remaining_fraction":1,"reset_in_seconds":18001},
         "3p-weekly":{"remaining_fraction":0.0004,"reset_in_seconds":204931},
         "gemini-5h":{"remaining_fraction":0.9989992,"reset_in_seconds":17279},
