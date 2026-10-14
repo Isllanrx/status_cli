@@ -41,6 +41,15 @@ at the binary's full path, so `PATH` does not matter. Open a new session afterwa
 `status_cli doctor` checks the result: version, `PATH`, each host's settings, the `codex-stt` shortcut and the
 detected terminal and language. It exits with 1 when something is missing.
 
+`status_cli update` moves to the latest GitHub release. It compares the release tag with the running version and stops
+if there is nothing newer. Otherwise it downloads that release's binary for your system with `curl`, which ships with
+Windows 10 and later, macOS and most Linux distributions. It checks the SHA-256 against the release's `SHA256SUMS`,
+makes sure the new binary runs, and only then swaps it in place of the running one. Open sessions pick it up on their
+next refresh. On Windows the running binary can't be overwritten, so it is renamed to `status_cli.old`, which the next
+update deletes. Errors exit with 1 and leave the installed binary untouched. `STATUS_CLI_RELEASE_URL` (release JSON)
+and `STATUS_CLI_BASE_URL` (asset folder) point it at another source, which is how the tests run it against a local
+release.
+
 ### Install with an AI assistant
 
 Ask Claude Code, Codex, agy or any assistant that can run commands:
