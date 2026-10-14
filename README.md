@@ -38,8 +38,8 @@ in `~/.local/bin` and runs `status_cli setup`, which configures every host it fi
 copy of each file it changes. On Windows the folder is added to `PATH`; on Linux and macOS the host settings point
 at the binary's full path, so `PATH` does not matter. Open a new session afterwards.
 
-`status_cli doctor` checks the result: version, `PATH`, each host's settings, the `codex-stt` shortcut and the
-detected terminal and language. It exits with 1 when something is missing.
+`status_cli doctor` checks the result: version, `PATH`, each host's settings and usage hooks, the `codex-stt`
+shortcut and the detected terminal and language. It exits with 1 when something is missing.
 
 `status_cli update` moves to the latest GitHub release. It compares the release tag with the running version and stops
 if there is nothing newer. Otherwise it downloads that release's binary for your system with `curl`, which ships with
@@ -126,21 +126,61 @@ describes it: the auto-compact window minus 33k tokens (about 967k on a 1M windo
 context unless `CLAUDE_CODE_AUTO_COMPACT_WINDOW` sets a smaller one, and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` can only
 bring the threshold down. Values set through `autoCompactWindow` in settings are not read.
 
+## Usage limits for agents
+
+`status_cli setup` also hooks `status_cli guard` into every host, so the agent knows how much of the 5-hour and
+weekly limits is used and when each one resets, without being asked:
+
+| Host | Where | When |
+| --- | --- | --- |
+| Claude Code | `hooks` in `settings.json` | every prompt (`UserPromptSubmit`), and before `Agent`, `Task` or `Workflow` |
+| Codex CLI | `~/.codex/hooks.json` | session start and every prompt |
+| agy | plugin in `~/.gemini/config/plugins/status_cli/` | session start, and before each model call near the limit |
+
+The agent reads a line such as `status_cli: session 57% (resets in 58m), week 21% (resets in 5d0h).` From 85% of
+the session or 90% of the week it is also told to keep its task notes current and to ask before starting subagents
+or workflows. From 95% of the session or 97% of the week it is told not to start new tasks: record what is done
+and what comes next, tell the user, and stop. In Claude Code, subagents then need confirmation, and are blocked once
+the limit is nearly exhausted. Codex has no confirmation step, so it only blocks.
+
+Claude Code and agy are read from the state the status line saves for that session; Codex is read from the session
+file Codex itself writes, so it works with or without `codex-stt`. A window that already reset is not reported.
+Codex runs only hooks you trust: after `status_cli setup`, approve the new ones once with `/hooks` in Codex.
+Running setup again replaces the previous guard entries and leaves every other hook alone.
+
 ## Languages
 
-Labels follow the system language: English, Spanish, Portuguese, French and Chinese, with English for anything
-else. `STATUS_CLI_LANG` overrides it (`en`, `es`, `pt`, `fr`, `zh`); otherwise `LC_ALL`, `LC_MESSAGES` and `LANG`
-are used, and the Windows display language when those are empty.
+Labels follow the system language, with English for anything else. `STATUS_CLI_LANG` overrides it; otherwise
+`LC_ALL`, `LC_MESSAGES` and `LANG` are used, and the Windows display language when those are empty. The first two
+letters pick the language, so `pt`, `pt_BR` and `pt-PT` all give Brazilian Portuguese and `zh_TW` gives simplified
+Chinese.
 
-| | en | es | pt | fr | zh |
-| --- | --- | --- | --- | --- | --- |
-| 5-hour window | session | sesión | sessão | session | 会话 |
-| Weekly window | week | semana | semana | semaine | 本周 |
-| Auto-compact | compact | compactar | compactar | compacter | 压缩 |
-| Context | context | contexto | contexto | contexte | 上下文 |
-| Duration | time | tiempo | tempo | temps | 时长 |
+| Code | Language | 5-hour window | Weekly window | Auto-compact | Context | Duration |
+| --- | --- | --- | --- | --- | --- | --- |
+| `en` | English | session | week | compact | context | time |
+| `pt` | Portuguese (Brazil) | sessão | semana | compactar | contexto | tempo |
+| `es` | Spanish | sesión | semana | compactar | contexto | tiempo |
+| `zh` | Chinese (simplified) | 会话 | 本周 | 压缩 | 上下文 | 时长 |
+| `hi` | Hindi | सत्र | सप्ताह | संक्षेपण | संदर्भ | समय |
+| `ar` | Arabic | الجلسة | الأسبوع | الضغط | السياق | الوقت |
+| `fr` | French | session | semaine | compacter | contexte | temps |
+| `de` | German | Sitzung | Woche | verdichten | Kontext | Zeit |
+| `ja` | Japanese | セッション | 今週 | 圧縮 | コンテキスト | 時間 |
+| `ru` | Russian | сессия | неделя | сжатие | контекст | время |
+| `ko` | Korean | 세션 | 주간 | 압축 | 컨텍스트 | 시간 |
+| `it` | Italian | sessione | settimana | compattare | contesto | tempo |
+| `id` | Indonesian | sesi | minggu | ringkas | konteks | waktu |
+| `tr` | Turkish | oturum | hafta | sıkıştır | bağlam | süre |
+| `vi` | Vietnamese | phiên | tuần | nén | ngữ cảnh | thời gian |
+| `th` | Thai | เซสชัน | สัปดาห์ | บีบอัด | บริบท | เวลา |
+| `bn` | Bengali | সেশন | সপ্তাহ | সংকোচন | প্রসঙ্গ | সময় |
+| `ur` | Urdu | سیشن | ہفتہ | کمپیکٹ | سیاق | وقت |
+| `pl` | Polish | sesja | tydzień | kompaktowanie | kontekst | czas |
+| `nl` | Dutch | sessie | week | compacteren | context | tijd |
 
-Chinese characters count as two columns, so the line keeps its width.
+Chinese, Japanese and Korean characters count as two columns and combining marks (Thai, Hindi, Bengali, Arabic
+vowel signs) as none, so the line keeps its width. Arabic and Urdu are written in logical order; how they read
+depends on the terminal's right-to-left support. The guard's messages to the agent use the same language.
 
 ## Configuration
 
@@ -150,7 +190,7 @@ Everything works out of the box. These environment variables change the defaults
 | --- | --- |
 | `STATUS_CLI_COLOR` | `truecolor`, `256`, `16` or `none`, for terminals that do not advertise their depth (tmux, screen) |
 | `STATUS_CLI_ASCII` | ASCII instead of Unicode glyphs |
-| `STATUS_CLI_LANG` | `en`, `es`, `pt`, `fr` or `zh` |
+| `STATUS_CLI_LANG` | Language code from the table above, such as `en`, `pt`, `zh`, `ja` or `ar` |
 | `NO_COLOR` | No colors |
 | `STATUS_CLI_LOG` | JSON Lines log with per-phase timings, host, model, effort and the rendered line |
 | `STATUS_CLI_CODEX` | Program to run instead of `codex` in `codex-stt` |
@@ -187,7 +227,7 @@ cargo llvm-cov --summary-only
 ```
 
 The suite has unit tests beside each module and integration tests in `tests/`: `cli` (rendering), `matrix` (every
-model, effort and mode), `i18n` (every language), `setup`, `codex`, `wrap` (Codex inside a real pseudo-terminal),
+model, effort and mode), `i18n` (every language), `setup`, `guard` (usage hooks and their registration), `codex`, `wrap` (Codex inside a real pseudo-terminal),
 `regression` (one test per fixed bug) and `e2e` (install, configure, then run the configured command through the
 host's shell). CI runs them on every platform and reports coverage.
 
