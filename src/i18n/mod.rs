@@ -15,6 +15,9 @@ pub struct Labels {
     pub context: &'static str,
     pub quota: &'static str,
     pub time: &'static str,
+    pub resets_in: &'static str,
+    pub limit_near: &'static str,
+    pub limit_reached: &'static str,
 }
 
 pub const ALL: [&Labels; 20] = [
@@ -102,7 +105,17 @@ mod tests {
     fn codes_are_unique_and_every_text_is_filled() {
         for (i, labels) in ALL.iter().enumerate() {
             assert!(ALL[..i].iter().all(|other| other.code.get(..2) != labels.code.get(..2)), "{}", labels.code);
-            let texts = [labels.session, labels.week, labels.compact, labels.context, labels.quota, labels.time];
+            let texts = [
+                labels.session,
+                labels.week,
+                labels.compact,
+                labels.context,
+                labels.quota,
+                labels.time,
+                labels.resets_in,
+                labels.limit_near,
+                labels.limit_reached,
+            ];
             assert!(texts.iter().all(|text| !text.trim().is_empty() && !text.contains("  ")), "{}", labels.code);
         }
     }

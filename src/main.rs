@@ -15,7 +15,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use features::telemetry::{self, Event, Timer};
-use features::{clock, codex, context, model, quota, setup, wrap};
+use features::{clock, codex, context, guard, model, quota, setup, wrap};
 use layout::Line;
 use payload::Payload;
 use state::Session;
@@ -45,6 +45,16 @@ fn main() {
             }
         },
         Some("codex") => return run_codex(env::args().skip(2).collect()),
+        Some("guard") => {
+            let Some(host) = env::args().nth(2).as_deref().and_then(guard::host) else {
+                eprintln!("status_cli: usage: status_cli guard <claude|codex|agy>");
+                std::process::exit(2);
+            };
+            if let Some(reply) = guard::run(host, &cache_dir(), now_millis()) {
+                print!("{reply}");
+            }
+            return;
+        }
         Some("--version" | "-V") => return println!("status_cli {}", env!("CARGO_PKG_VERSION")),
         _ => {}
     }

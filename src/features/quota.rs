@@ -23,12 +23,10 @@ pub struct Quota {
 }
 
 pub fn read(payload: &Payload, now: u64, session: &mut Session) -> Vec<Quota> {
-    let mut quota = |label, pct, resets_at, window, show_reset| Quota {
-        label,
-        motion: session.track(label, pct),
-        resets_at,
-        window,
-        show_reset,
+    let mut quota = |label, pct, resets_at, window, show_reset| {
+        let motion = session.track(label, pct);
+        session.resets(label, resets_at);
+        Quota { label, motion, resets_at, window, show_reset }
     };
     match payload.host() {
         Host::Claude | Host::Codex => {
