@@ -1,6 +1,4 @@
-mod common;
-
-use common::*;
+use crate::common::*;
 use serde_json::Value;
 use std::fs;
 use std::io::Write;

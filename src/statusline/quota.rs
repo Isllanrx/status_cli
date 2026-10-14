@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use crate::i18n::labels;
-use crate::payload::{self, Host, Payload};
-use crate::state::{Motion, Session};
-use crate::style::{Frame, Gauge, SOFT, duration, heat, paint};
-use crate::terminal::caps;
+use crate::render::style::{Frame, Gauge, SOFT, duration, heat, paint};
+use crate::render::terminal::caps;
+use crate::shared::payload::{self, Host, Payload};
+use crate::shared::state::{Motion, Session};
 
 const FIVE_HOURS_MS: u64 = 5 * 3_600_000;
 const SEVEN_DAYS_MS: u64 = 7 * 86_400_000;
@@ -141,8 +141,8 @@ impl Quota {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::payload::parse;
-    use crate::style::strip;
+    use crate::render::style::strip;
+    use crate::shared::payload::parse;
 
     const NOW: u64 = 1_000_000;
 

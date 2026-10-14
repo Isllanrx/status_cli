@@ -1,6 +1,4 @@
-mod common;
-
-use common::*;
+use crate::common::*;
 
 #[test]
 fn every_claude_model_effort_and_mode_fits_and_reads_right() {

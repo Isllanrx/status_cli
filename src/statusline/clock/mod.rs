@@ -1,3 +1,5 @@
+mod process;
+
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
@@ -5,12 +7,11 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::i18n::labels;
-use crate::payload::{Host, Payload};
-use crate::process;
-use crate::state::Session;
-use crate::style::{Frame, LABEL, SOFT, STRONG, TRACK, paint};
-use crate::terminal::caps;
-use crate::time::parse_utc_millis;
+use crate::render::style::{Frame, LABEL, SOFT, STRONG, TRACK, paint};
+use crate::render::terminal::caps;
+use crate::shared::payload::{Host, Payload};
+use crate::shared::state::Session;
+use crate::shared::time::parse_utc_millis;
 
 pub fn read(payload: &Payload, session: &mut Session, now: u64) -> Option<u64> {
     let base_ms = match payload.host() {
@@ -69,7 +70,7 @@ pub fn render(ms: u64, frame: &Frame) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::strip;
+    use crate::render::style::strip;
 
     #[test]
     fn renders_animated_hh_mm() {

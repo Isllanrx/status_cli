@@ -1,6 +1,6 @@
 use std::fmt::{Display, Write};
 
-use crate::terminal::{Depth, caps};
+use crate::render::terminal::{Depth, caps};
 
 #[derive(Clone, Copy)]
 pub struct Style {

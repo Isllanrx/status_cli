@@ -1,6 +1,4 @@
-mod common;
-
-use common::*;
+use crate::common::*;
 use std::fs::{self, File};
 use std::time::{Duration, SystemTime};
 

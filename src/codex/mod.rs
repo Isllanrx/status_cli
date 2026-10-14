@@ -1,3 +1,5 @@
+pub mod wrap;
+
 use std::env;
 use std::error::Error;
 use std::fs::{self, File};
@@ -7,8 +9,8 @@ use std::time::SystemTime;
 
 use serde_json::Value;
 
-use crate::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Window};
-use crate::time::parse_utc_millis;
+use crate::shared::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Window};
+use crate::shared::time::parse_utc_millis;
 
 const TAIL_BYTES: u64 = 256 * 1024;
 const RECENT_DAYS: usize = 2;

@@ -1,5 +1,5 @@
-use crate::payload::{Host, Payload};
-use crate::style::{SOFT, STRONG, capitalize, heat, paint};
+use crate::render::style::{SOFT, STRONG, capitalize, heat, paint};
+use crate::shared::payload::{Host, Payload};
 
 const EFFORT_HEAT: f64 = 65.0;
 
@@ -46,8 +46,8 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::payload::parse;
-    use crate::style::strip;
+    use crate::render::style::strip;
+    use crate::shared::payload::parse;
 
     fn line(json: &str) -> Option<String> {
         read(&parse(json)).map(|m| strip(&m.render()))

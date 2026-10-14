@@ -1,3 +1,5 @@
+pub mod guard;
+
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -5,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::payload::{Host, Payload, RateLimits, Window};
-use crate::state::write_atomic;
+use crate::shared::payload::{Host, Payload, RateLimits, Window};
+use crate::shared::state::write_atomic;
 
 const SAME_WINDOW_MS: u64 = 15 * 60_000;
 
@@ -113,7 +115,7 @@ fn apply(payload: &mut Payload, merged: &Readings, now: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::payload::parse;
+    use crate::shared::payload::parse;
 
     const NOW: u64 = 1_000_000_000;
 

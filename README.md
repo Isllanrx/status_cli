@@ -239,13 +239,26 @@ cargo test
 cargo llvm-cov --summary-only
 ```
 
-The suite has unit tests beside each module and integration tests in `tests/`: `cli` (rendering), `matrix` (every
-model, effort and mode), `i18n` (every language), `setup`, `guard` (usage hooks and their registration), `codex`, `wrap` (Codex inside a real pseudo-terminal),
-`regression` (one test per fixed bug) and `e2e` (install, configure, then run the configured command through the
-host's shell). CI runs them on every platform and reports coverage.
+The code is split by slice, and each slice owns its parsing, rendering and tests:
 
-Each feature in `src/features/` owns its parsing, rendering and tests; `payload`, `state`, `style`, `terminal` and
-`layout` are shared. Releases are automatic. Every push to `main` that changes `src/`, `Cargo.toml` or `Cargo.lock`
+| Folder | Contents |
+|---|---|
+| `src/statusline/` | Line segments (`model`, `context`, `quota`, `clock`) and the width-based `layout` |
+| `src/statusline/clock/` | Session clock and the process lookup that dates the agy window |
+| `src/codex/` | Codex rollout reader; `wrap/` runs Codex inside a pseudo-terminal |
+| `src/usage/` | Usage shared across terminals and the `guard` hook |
+| `src/install/` | `setup`, `doctor`, host hooks and `update` |
+| `src/shared/` | Host payload, session state, time parsing and telemetry |
+| `src/render/` | Colors, gauges and terminal capabilities |
+| `src/i18n/` | Labels in every language |
+
+The suite has unit tests beside each module and one integration crate per slice in `tests/`, sharing `tests/common/`:
+`statusline` (`cli` rendering, `matrix` with every model, effort and mode, `i18n` with every language, `regression`
+with one test per fixed bug), `codex` (`reader`, and `wrap` with Codex inside a real pseudo-terminal), `install`
+(`setup`, `update`, and `e2e`, which installs, configures and runs the configured command through the host's shell)
+and `usage` (`guard` hooks and their registration). CI runs them on every platform and reports coverage.
+
+Releases are automatic. Every push to `main` that changes `src/`, `Cargo.toml` or `Cargo.lock`
 since the last `vX.Y.Z` tag ships the next minor version: `v1.1.0` becomes `v1.2.0`. CI writes that number into
 `Cargo.toml` and `Cargo.lock` inside the runner before building, so nothing is committed back. The `version` in
 `Cargo.toml` is a floor: raise it by hand for a major or a specific version, and CI uses it when it's higher. Pushes

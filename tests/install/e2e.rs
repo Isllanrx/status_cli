@@ -1,11 +1,9 @@
-mod common;
-
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use common::*;
+use crate::common::*;
 
 fn with_home(command: &mut Command, home: &Path) {
     command

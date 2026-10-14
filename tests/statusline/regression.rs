@@ -1,6 +1,4 @@
-mod common;
-
-use common::*;
+use crate::common::*;
 
 fn claude_with(five_hour: &str) -> String {
     format!(

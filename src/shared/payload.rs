@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-use crate::time::parse_utc_millis;
+use crate::shared::time::parse_utc_millis;
 
 pub const MAX_COLUMNS: usize = 1000;
 const MAX_TEXT_CHARS: usize = 48;

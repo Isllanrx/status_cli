@@ -4,11 +4,11 @@ use std::path::Path;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::features::codex;
+use crate::codex;
 use crate::i18n::{ALL, labels};
-use crate::payload::{Host, Payload, Window};
-use crate::state::{self, Reading};
-use crate::style::duration;
+use crate::render::style::duration;
+use crate::shared::payload::{Host, Payload, Window};
+use crate::shared::state::{self, Reading};
 
 const MAX_INPUT_BYTES: u64 = 1 << 20;
 const SESSION: Limits = Limits { near: 85.0, reached: 95.0 };

@@ -1,7 +1,7 @@
 use crate::i18n::labels;
-use crate::payload::{Host, Payload};
-use crate::state::{Motion, Session};
-use crate::style::{Frame, Gauge};
+use crate::render::style::{Frame, Gauge};
+use crate::shared::payload::{Host, Payload};
+use crate::shared::state::{Motion, Session};
 
 const AUTOCOMPACT_BUFFER: f64 = 33_000.0;
 
@@ -47,8 +47,8 @@ impl Context {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::payload::parse;
-    use crate::style::strip;
+    use crate::render::style::strip;
+    use crate::shared::payload::parse;
 
     fn line(json: &str, auto_compact: AutoCompact) -> String {
         let mut session = Session::detached(0);
