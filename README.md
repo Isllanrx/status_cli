@@ -192,9 +192,13 @@ model, effort and mode), `i18n` (every language), `setup`, `codex`, `wrap` (Code
 host's shell). CI runs them on every platform and reports coverage.
 
 Each feature in `src/features/` owns its parsing, rendering and tests; `payload`, `state`, `style`, `terminal` and
-`layout` are shared. Releases are automatic: bump `version` in `Cargo.toml` and merge to `main`. Once every test,
-shell and distro check passes, CI tags the commit, publishes the binaries with `SHA256SUMS` and installs them on
-each platform.
+`layout` are shared. Releases are automatic. Every push to `main` that changes `src/`, `Cargo.toml` or `Cargo.lock`
+since the last `vX.Y.Z` tag ships the next minor version: `v1.1.0` becomes `v1.2.0`. CI writes that number into
+`Cargo.toml` and `Cargo.lock` inside the runner before building, so nothing is committed back. The `version` in
+`Cargo.toml` is a floor: raise it by hand for a major or a specific version, and CI uses it when it's higher. Pushes
+that only touch docs or CI don't release. Once every test, shell and distro check passes, CI tags the commit,
+publishes the binaries with `SHA256SUMS` and installs them on each platform. Local builds report the `Cargo.toml`
+version, which can trail the latest release.
 
 ## License
 
