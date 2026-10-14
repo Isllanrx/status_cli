@@ -1,8 +1,11 @@
 pub mod clock;
 pub mod codex;
 pub mod context;
+pub mod guard;
+pub mod hooks;
 pub mod model;
 pub mod quota;
 pub mod setup;
 pub mod telemetry;
+pub mod update;
 pub mod wrap;

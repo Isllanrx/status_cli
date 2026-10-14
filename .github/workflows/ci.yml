@@ -44,7 +44,7 @@ jobs:
       - run: tail -n 1 coverage.txt >> "$GITHUB_STEP_SUMMARY"
 
   build:
-    needs: test
+    needs: [test, version]
     strategy:
       fail-fast: false
       matrix:
@@ -64,6 +64,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      - shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          export VERSION="${TAG#v}"
+          perl -pi -e '$done ||= s/^version = "[^"]*"/version = "$ENV{VERSION}"/' Cargo.toml
+          perl -0pi -e 's/(name = "status_cli"\r?\nversion = )"[^"]*"/$1"$ENV{VERSION}"/' Cargo.lock
+          grep -m1 '^version' Cargo.toml
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - if: runner.os == 'macOS'
         run: |
@@ -202,16 +210,30 @@ jobs:
           fetch-depth: 0
       - id: version
         run: |
-          tag="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          base=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          last=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)
           publish=false
-          if [ "$GITHUB_REF" = "refs/heads/main" ] && ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag="$GITHUB_REF_NAME"
             publish=true
-          elif [ "$GITHUB_REF" = "refs/tags/$tag" ]; then
-            publish=true
+          elif [ -z "$last" ]; then
+            tag="v$base"
+          else
+            current=${last#v}
+            major=${current%%.*}
+            rest=${current#*.}
+            next="$major.$((${rest%%.*} + 1)).0"
+            highest=$(printf '%s\n' "$next" "$base" | sort -V | tail -n 1)
+            tag="v$highest"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            if [ -z "$last" ] || ! git diff --quiet "$last" HEAD -- src Cargo.toml Cargo.lock; then
+              publish=true
+            fi
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
-          echo "$tag publish=$publish"
+          echo "last=${last:-none} next=$tag publish=$publish"
 
   release:
     if: needs.version.outputs.publish == 'true'

@@ -28,6 +28,8 @@ struct Trend {
     from: f64,
     to: f64,
     changed_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resets_at: Option<u64>,
 }
 
 pub struct Motion {
@@ -81,9 +83,14 @@ impl Session {
     pub fn track(&mut self, label: &str, pct: Option<f64>) -> Option<Motion> {
         let pct = pct?;
         let now = self.now;
-        let trend = self.current.gauges.entry(label.to_owned()).or_insert(Trend { from: pct, to: pct, changed_at: 0 });
+        let trend = self.current.gauges.entry(label.to_owned()).or_insert(Trend {
+            from: pct,
+            to: pct,
+            changed_at: 0,
+            resets_at: None,
+        });
         if pct.round() != trend.to.round() {
-            *trend = Trend { from: trend.shown(now), to: pct, changed_at: now };
+            *trend = Trend { from: trend.shown(now), to: pct, changed_at: now, ..*trend };
         } else {
             let shift = pct - trend.to;
             trend.from += shift;
@@ -91,6 +98,12 @@ impl Session {
         }
         let shown = trend.shown(now);
         Some(Motion { shown, growing: trend.to > trend.from && shown < trend.to })
+    }
+
+    pub fn resets(&mut self, label: &str, at: Option<u64>) {
+        if let Some(trend) = self.current.gauges.get_mut(label) {
+            trend.resets_at = at;
+        }
     }
 
     pub fn advance(&mut self, now: u64) {
@@ -111,6 +124,17 @@ impl Session {
             self.saved = self.current.clone();
         }
     }
+}
+
+pub struct Reading {
+    pub pct: f64,
+    pub resets_at: Option<u64>,
+}
+
+pub fn read(dir: &Path, key: &str, labels: &[&str]) -> Option<Reading> {
+    let snapshot = load(&dir.join(format!("{FILE_PREFIX}{key}")))?;
+    let trend = labels.iter().find_map(|label| snapshot.gauges.get(*label))?;
+    Some(Reading { pct: trend.to, resets_at: trend.resets_at })
 }
 
 fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -195,5 +219,18 @@ mod tests {
         s.track("x", Some(79.1));
         s.now = 10_000;
         assert_eq!(s.track("x", Some(79.4)).map(|m| m.shown), Some(79.4));
+    }
+
+    #[test]
+    fn reset_survives_value_changes_and_is_saved() {
+        let mut s = Session::detached(0);
+        s.resets("x", Some(9_000));
+        assert!(s.current.gauges.is_empty());
+        s.track("x", Some(10.0));
+        s.resets("x", Some(9_000));
+        s.track("x", Some(40.0));
+        assert_eq!(s.current.gauges["x"].resets_at, Some(9_000));
+        let json = serde_json::to_string(&s.current).unwrap();
+        assert!(json.contains(r#""resets_at":9000"#));
     }
 }

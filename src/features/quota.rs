@@ -23,12 +23,10 @@ pub struct Quota {
 }
 
 pub fn read(payload: &Payload, now: u64, session: &mut Session) -> Vec<Quota> {
-    let mut quota = |label, pct, resets_at, window, show_reset| Quota {
-        label,
-        motion: session.track(label, pct),
-        resets_at,
-        window,
-        show_reset,
+    let mut quota = |label, pct, resets_at, window, show_reset| {
+        let motion = session.track(label, pct);
+        session.resets(label, resets_at);
+        Quota { label, motion, resets_at, window, show_reset }
     };
     match payload.host() {
         Host::Claude | Host::Codex => {
@@ -212,6 +210,13 @@ mod tests {
         let json = r#"{"product":"antigravity","model":{"id":"gemini-3-pro"},
             "quota":{"flash":{"remaining_fraction":0.1},"gemini-3-pro":{"remaining_fraction":0.75,"reset_in_seconds":120}}}"#;
         assert_eq!(lines(json, false), ["cota 25% ↻ 2m"]);
+    }
+
+    #[test]
+    fn agy_reads_reset_time_when_seconds_are_missing() {
+        let json = r#"{"product":"antigravity","model":{"id":"gemini-3-pro"},
+            "quota":{"gemini-3-pro":{"remaining_fraction":0.5,"reset_time":"1969-12-31T21:20:00-03:00"}}}"#;
+        assert_eq!(lines(json, false), ["cota 50% ↻ 3m"]);
     }
 
     const AGY_QUOTA: &str = r#""quota":{"3p-5h":{"remaining_fraction":1,"reset_in_seconds":18001},

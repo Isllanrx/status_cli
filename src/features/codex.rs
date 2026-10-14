@@ -82,7 +82,7 @@ impl Reader {
     }
 }
 
-fn parse_session(file: &Path) -> Result<Payload, Box<dyn Error>> {
+pub fn parse_session(file: &Path) -> Result<Payload, Box<dyn Error>> {
     let mut payload = Payload { product: Some("codex".to_owned()), ..Payload::default() };
     for record in tail_records(file)?.iter().rev() {
         let body = &record["payload"];
