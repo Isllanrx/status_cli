@@ -37,6 +37,13 @@ fn main() {
             lines.iter().for_each(|line| println!("{line}"));
             std::process::exit(if healthy { 0 } else { 1 });
         }
+        Some("update") => match features::update::run() {
+            Ok(message) => return println!("{message}"),
+            Err(err) => {
+                eprintln!("status_cli: {err}");
+                std::process::exit(1);
+            }
+        },
         Some("codex") => return run_codex(env::args().skip(2).collect()),
         Some("--version" | "-V") => return println!("status_cli {}", env!("CARGO_PKG_VERSION")),
         _ => {}
