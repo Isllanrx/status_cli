@@ -1,5 +1,11 @@
+mod latin;
+mod scripts;
+
 use std::env;
 use std::sync::OnceLock;
+
+use latin::*;
+use scripts::*;
 
 pub struct Labels {
     pub code: &'static str,
@@ -11,51 +17,28 @@ pub struct Labels {
     pub time: &'static str,
 }
 
-const ENGLISH: Labels = Labels {
-    code: "en",
-    session: "session",
-    week: "week",
-    compact: "compact",
-    context: "context",
-    quota: "quota",
-    time: "time",
-};
-const SPANISH: Labels = Labels {
-    code: "es",
-    session: "sesión",
-    week: "semana",
-    compact: "compactar",
-    context: "contexto",
-    quota: "cuota",
-    time: "tiempo",
-};
-const PORTUGUESE: Labels = Labels {
-    code: "pt",
-    session: "sessão",
-    week: "semana",
-    compact: "compactar",
-    context: "contexto",
-    quota: "cota",
-    time: "tempo",
-};
-const FRENCH: Labels = Labels {
-    code: "fr",
-    session: "session",
-    week: "semaine",
-    compact: "compacter",
-    context: "contexte",
-    quota: "quota",
-    time: "temps",
-};
-const CHINESE: Labels = Labels {
-    code: "zh",
-    session: "会话",
-    week: "本周",
-    compact: "压缩",
-    context: "上下文",
-    quota: "配额",
-    time: "时长",
-};
+pub const ALL: [&Labels; 20] = [
+    &ENGLISH,
+    &PORTUGUESE,
+    &SPANISH,
+    &CHINESE,
+    &HINDI,
+    &ARABIC,
+    &FRENCH,
+    &GERMAN,
+    &JAPANESE,
+    &RUSSIAN,
+    &KOREAN,
+    &ITALIAN,
+    &INDONESIAN,
+    &TURKISH,
+    &VIETNAMESE,
+    &THAI,
+    &BENGALI,
+    &URDU,
+    &POLISH,
+    &DUTCH,
+];
 
 pub fn labels() -> &'static Labels {
     if cfg!(test) {
@@ -72,13 +55,12 @@ pub fn labels() -> &'static Labels {
 }
 
 fn for_locale(locale: &str) -> &'static Labels {
-    match locale.get(..2).map(str::to_ascii_lowercase).as_deref() {
-        Some("es") => &SPANISH,
-        Some("pt") => &PORTUGUESE,
-        Some("fr") => &FRENCH,
-        Some("zh") => &CHINESE,
-        _ => &ENGLISH,
-    }
+    let language = match locale.get(..2).map(str::to_ascii_lowercase).as_deref() {
+        Some("in") => "id".to_owned(),
+        Some(other) => other.to_owned(),
+        None => return &ENGLISH,
+    };
+    ALL.into_iter().find(|labels| labels.code.get(..2) == Some(language.as_str())).unwrap_or(&ENGLISH)
 }
 
 #[cfg(windows)]
@@ -100,13 +82,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn locales_map_to_the_five_languages() {
+    fn locales_map_to_their_language() {
         assert_eq!(for_locale("pt_BR.UTF-8").session, "sessão");
         assert_eq!(for_locale("es-ES").session, "sesión");
         assert_eq!(for_locale("fr_FR").week, "semaine");
         assert_eq!(for_locale("zh_CN.UTF-8").session, "会话");
+        assert_eq!(for_locale("de-DE").session, "Sitzung");
+        assert_eq!(for_locale("ja_JP.UTF-8").code, "ja");
+        assert_eq!(for_locale("hi-IN").code, "hi");
+        assert_eq!(for_locale("ar_SA").code, "ar");
+        assert_eq!(for_locale("in_ID").code, "id");
+        assert_eq!(for_locale("nl-BE").code, "nl");
         assert_eq!(for_locale("en_US").session, "session");
-        assert_eq!(for_locale("de_DE").session, "session");
+        assert_eq!(for_locale("sv_SE").session, "session");
         assert_eq!(for_locale("").session, "session");
+    }
+
+    #[test]
+    fn codes_are_unique_and_every_text_is_filled() {
+        for (i, labels) in ALL.iter().enumerate() {
+            assert!(ALL[..i].iter().all(|other| other.code.get(..2) != labels.code.get(..2)), "{}", labels.code);
+            let texts = [labels.session, labels.week, labels.compact, labels.context, labels.quota, labels.time];
+            assert!(texts.iter().all(|text| !text.trim().is_empty() && !text.contains("  ")), "{}", labels.code);
+        }
     }
 }
