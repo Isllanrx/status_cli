@@ -14,6 +14,7 @@ fn setup_unlocked(home: &std::path::Path) -> std::process::Output {
         .arg("setup")
         .env("HOME", home)
         .env("USERPROFILE", home)
+        .env("STATUS_CLI_NO_SHIM", "1")
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("CODEX_HOME")
         .output()

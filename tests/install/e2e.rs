@@ -9,6 +9,7 @@ fn with_home(command: &mut Command, home: &Path) {
     command
         .env("HOME", home)
         .env("USERPROFILE", home)
+        .env("STATUS_CLI_NO_SHIM", "1")
         .env("XDG_RUNTIME_DIR", home)
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("CODEX_HOME")

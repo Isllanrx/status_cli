@@ -100,9 +100,10 @@ Codex has no external status line item (its `[tui] status_line` only takes built
 so the only way to keep typing `codex` is to intercept the command on `PATH`. On Windows, `status_cli setup` run from
 an elevated PowerShell copies itself to `%ProgramFiles%\status_cli\codex.exe` (writable only by administrators) and
 inserts that folder in the machine `PATH` right before the first folder holding a Codex launcher (npm's
-`AppData\Roaming
-pm` is usually in the machine `PATH`, which Windows puts before the user `PATH`). The previous value
-is saved once to `%ProgramFiles%\status_cli\machine-path.bak`, the value keeps its `REG_EXPAND_SZ` type and is read
+`AppData\Roaming\npm` is usually in the machine `PATH`, which Windows puts before the user `PATH`). When Codex is only
+on the user `PATH`, the folder goes at the end of the machine `PATH`, which still comes first; when no `codex` is on
+`PATH` at all, setup leaves the machine untouched. `STATUS_CLI_NO_SHIM=1` makes setup skip this step (the tests set it).
+The previous value is saved once to `%ProgramFiles%\status_cli\machine-path.bak`, the value keeps its `REG_EXPAND_SZ` type and is read
 and written through the registry API, and open programs are told the environment changed; new terminals pick it up.
 Without elevation setup only reports what it would do. PowerShell 7, Windows PowerShell, cmd and Git Bash then all
 resolve `codex` to the shim. The shim hands the call to the `status_cli` found on `PATH` (so `status_cli update`

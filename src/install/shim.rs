@@ -5,13 +5,20 @@ use std::path::{Path, PathBuf};
 
 const LAUNCHERS: [&str; 5] = ["codex.exe", "codex.cmd", "codex.bat", "codex.ps1", "codex"];
 const BACKUP: &str = "machine-path.bak";
+const SKIP_VAR: &str = "STATUS_CLI_NO_SHIM";
 
 pub fn dir() -> Option<PathBuf> {
     env::var_os("ProgramFiles").map(|dir| PathBuf::from(dir).join("status_cli"))
 }
 
 pub fn install(exe: &Path) -> Result<String, String> {
+    if env::var_os(SKIP_VAR).is_some() {
+        return Ok(format!("codex: not intercepted ({SKIP_VAR} is set)"));
+    }
     let dir = dir().ok_or("codex: ProgramFiles is not set; not intercepted")?;
+    if first_launcher().is_none() {
+        return Ok("codex: not on PATH, not intercepted; run `status_cli setup` after installing Codex".to_owned());
+    }
     let shim = dir.join(format!("codex{}", env::consts::EXE_SUFFIX));
     let done = copy(exe, &shim).and_then(|()| route(&dir));
     match done {
@@ -28,9 +35,7 @@ pub fn install(exe: &Path) -> Result<String, String> {
 
 pub fn doctor() -> String {
     let Some(dir) = dir() else { return "info    codex is not intercepted: ProgramFiles is not set".to_owned() };
-    let first = env::var_os("PATH")
-        .and_then(|path| env::split_paths(&path).find(|entry| LAUNCHERS.iter().any(|name| entry.join(name).is_file())));
-    match first {
+    match first_launcher() {
         Some(first) if same(&first.to_string_lossy(), &dir.to_string_lossy()) => {
             format!("ok      codex runs through status_cli -> {}", dir.display())
         }
@@ -40,6 +45,11 @@ pub fn doctor() -> String {
         ),
         None => "info    codex is not on PATH".to_owned(),
     }
+}
+
+fn first_launcher() -> Option<PathBuf> {
+    env::var_os("PATH")
+        .and_then(|path| env::split_paths(&path).find(|entry| LAUNCHERS.iter().any(|name| entry.join(name).is_file())))
 }
 
 fn copy(exe: &Path, shim: &Path) -> io::Result<()> {
@@ -71,7 +81,7 @@ fn route(dir: &Path) -> io::Result<()> {
 
 fn place(path: &str, dir: &str, launcher: impl Fn(&str) -> bool) -> String {
     let mut entries: Vec<&str> = path.split(';').filter(|entry| !same(entry, dir)).collect();
-    let at = entries.iter().position(|entry| !entry.trim().is_empty() && launcher(entry)).unwrap_or(0);
+    let at = entries.iter().position(|entry| !entry.trim().is_empty() && launcher(entry)).unwrap_or(entries.len());
     entries.insert(at, dir);
     entries.join(";")
 }
@@ -205,7 +215,7 @@ mod tests {
     fn a_misplaced_shim_entry_is_moved_and_the_rest_is_kept() {
         let path = format!(r"C:\Codex\bin;C:\Windows;;{SHIM}\");
         assert_eq!(place(&path, SHIM, has_codex), format!(r"{SHIM};C:\Codex\bin;C:\Windows;"));
-        assert_eq!(place(r"C:\Windows", SHIM, has_codex), format!(r"{SHIM};C:\Windows"));
+        assert_eq!(place(r"C:\Windows", SHIM, has_codex), format!(r"C:\Windows;{SHIM}"));
     }
 
     #[test]
