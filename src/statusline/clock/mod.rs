@@ -58,9 +58,11 @@ pub fn cell(ms: u64, frame: &Frame) -> Cell {
     let digits = VALUE.bold();
     let colon = paint(if frame.odd_second() { TRACK } else { digits }, ':');
     let minutes_style = if minute_turned { digits.underline() } else { digits };
+    let days = minutes / (24 * 60);
+    let days = if days > 0 { paint(digits, format_args!("{days}d ")) } else { String::new() };
     let body = format!(
-        "{}{colon}{}{}",
-        paint(digits, format_args!("{:02}", minutes / 60)),
+        "{days}{}{colon}{}{}",
+        paint(digits, format_args!("{:02}", minutes / 60 % 24)),
         paint(minutes_style, format_args!("{:02}", minutes % 60)),
         paint(VALUE, format_args!(":{:02}", (ms / 1000) % 60)),
     );
@@ -78,6 +80,8 @@ mod tests {
         let flat = |cell: Cell| strip(&format!("{} {}", cell.head, cell.body));
         assert_eq!(flat(cell(3_900_000, &frame)), "Tempo 01:05:00");
         assert_eq!(flat(cell(59_000, &Frame { tight: true, ..frame })), "Tempo 00:00:59");
+        assert_eq!(flat(cell(86_399_000, &frame)), "Tempo 23:59:59");
+        assert_eq!(flat(cell(2 * 86_400_000 + 12_324_000, &frame)), "Tempo 2d 03:25:24");
     }
 
     #[test]

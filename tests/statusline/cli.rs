@@ -225,7 +225,7 @@ fn agy_clock_starts_at_the_transcript_creation_time() {
     let input = r#"{"product":"antigravity","conversation_id":"c-1","model":{"display_name":"Gemini 3.8 Flash"},"terminal_width":150}"#;
     let out =
         run_with(&temp, input, None, &[("HOME", temp.0.to_str().unwrap()), ("USERPROFILE", temp.0.to_str().unwrap())]);
-    let clock = out.text.split(" | ").find(|cell| cell.starts_with("Tempo ")).unwrap().rsplit(' ').next().unwrap();
-    let hours: u64 = clock.split(':').next().unwrap().parse().unwrap();
-    assert!(hours > 200_000, "{:?}", out.text);
+    let clock = out.text.split(" | ").find(|cell| cell.starts_with("Tempo ")).unwrap();
+    let days: u64 = clock.split(' ').nth(1).unwrap().trim_end_matches('d').parse().unwrap();
+    assert!(days > 8_000, "{:?}", out.text);
 }

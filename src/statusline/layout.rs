@@ -61,11 +61,17 @@ impl Line {
                 _ => cell.head,
             };
             let width = visible_width(&head).max(visible_width(&cell.body));
-            rows[0].push(fill(head, width));
+            rows[0].push(center(head, width));
             rows[1].push(fill(cell.body, width));
         }
-        rows.map(|row| panel(&row.join(&separator)))
+        let [head, body] = rows.map(|row| row.join(&separator));
+        [panel(&head, true), panel(&body, false)]
     }
+}
+
+fn center(text: String, width: usize) -> String {
+    let gap = width.saturating_sub(visible_width(&text));
+    " ".repeat(gap / 2) + &text + &" ".repeat(gap - gap / 2)
 }
 
 fn fill(text: String, width: usize) -> String {

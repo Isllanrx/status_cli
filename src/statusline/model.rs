@@ -4,7 +4,6 @@ use crate::render::terminal::caps;
 use crate::shared::payload::{Host, Payload};
 
 const EFFORT_HEAT: f64 = 65.0;
-const PILL: [u8; 3] = [72, 56, 18];
 
 pub struct Model {
     name: String,
@@ -35,10 +34,11 @@ impl Model {
     pub fn render(&self) -> String {
         let mut out = paint(STRONG, &self.name);
         if let Some(effort) = &self.effort {
-            out += &paint(heat(EFFORT_HEAT).bold().on(PILL), format_args!(" {effort} "));
+            out += " ";
+            out += &paint(heat(EFFORT_HEAT).bold(), effort);
         }
         if self.fast {
-            out += &paint(SOFT, if self.effort.is_some() { "· " } else { " · " });
+            out += &paint(SOFT, " · ");
             out += &paint(heat(70.0).bold(), "fast");
         }
         out

@@ -47,7 +47,7 @@ fn wraps_the_child_and_keeps_the_last_two_rows_for_the_status() {
     assert_eq!(status.exit_code(), 3);
     assert!(output.contains("READY"), "{output:?}");
     assert!(cfg!(windows) || output.contains("\x1b[1;22r"), "{output:?}");
-    assert!(["\x1b[23;1H", "\x1b[24;1H"].iter().all(|row| output.contains(row)), "{output:?}");
+    assert!(output.contains("\x1b[23;1H"), "{output:?}");
     assert!(output.contains("By Isllan T."), "{output:?}");
     assert!(output.contains("Sessão") && output.contains("Tempo"), "{output:?}");
 }

@@ -47,12 +47,12 @@ line (it installs `%ProgramFiles%\status_cli\codex.exe` ahead of npm's `codex` i
 ## What it shows
 
 ```
-◆ Modelo       │ ◷ Sessão               │ ▦ Semana       │ ≡ Compactar    │ ◷ Tempo  │
-Opus 5.5 High  │ ━━━━────── 40% ↻ 1h29m │ ━━──────── 24% │ ━━━━────── 43% │ 03:25:24 │ By Isllan T.
+  ◆ Modelo    │        ◷ Sessão        │    ▦ Semana    │  ≡ Compactar   │ ◵ Tempo  │
+Opus 5.5 High │ ━━━━────── 40% ↻ 1h29m │ ━━──────── 24% │ ━━━━────── 43% │ 03:25:24 │ By Isllan T.
 ```
 
 Each segment shows its label above its value on a dark panel (256 colors or more). With the Nerd Font the icons are a
-robot, clock, calendar, database and timer and the panel gets rounded ends; without it they fall back to the plain
+robot, clock, calendar, database and timer and the panel corners are cut diagonally; without it they fall back to the plain
 symbols above and square ends, and to no icons in ASCII mode. On narrow terminals the bars shrink, then the credit,
 bars and icons go, then whole columns from the right.
 
@@ -63,7 +63,7 @@ bars and icons go, then whole columns from the right.
 | Semana | Weekly usage. On agy, `Suspensa` when agy says the window does not apply right now |
 | Compactar | Claude Code: progress towards auto-compact, using the window from your settings |
 | Contexto | Codex and agy: share of the context window in use |
-| Tempo | Time since the session window opened |
+| Tempo | Time since the session window opened, `HH:MM:SS` up to 23:59:59, then `2d 03:25:24` |
 
 `–` means the host sent no value. Labels follow the system language (20 languages).
 

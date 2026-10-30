@@ -24,10 +24,6 @@ impl Style {
         Self { dim: true, bold: false, ..self }
     }
 
-    pub const fn on(self, bg: [u8; 3]) -> Self {
-        Self { bg: Some(bg), ..self }
-    }
-
     pub const fn underline(self) -> Self {
         Self { underline: true, ..self }
     }
@@ -102,7 +98,7 @@ pub fn paint_into(out: &mut String, style: Style, text: impl Display) {
     }
 }
 
-pub fn panel(row: &str) -> String {
+pub fn panel(row: &str, top: bool) -> String {
     let pad = caps().glyphs.pad;
     let mut fill = String::new();
     let deep = matches!(caps().depth, Depth::TrueColor | Depth::Ansi256);
@@ -110,7 +106,7 @@ pub fn panel(row: &str) -> String {
         return format!("{pad}{row} ");
     }
     let body = row.replace("\x1b[0m", &format!("\x1b[0m{fill}"));
-    match caps().icons.rounded() {
+    match caps().icons.corners(top) {
         Some((left, right)) => {
             let edge = Style::rgb(PANEL_RGB);
             format!("{}{fill} {body} \x1b[0m{}", paint(edge, left), paint(edge, right))

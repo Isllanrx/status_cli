@@ -141,7 +141,7 @@ terminal rows (Codex runs in a pseudo-terminal two rows shorter, its scroll regi
 them never reach Codex). Error messages are one line. Labels start each word with a capital letter. Icons come from the
 CaskaydiaCove Nerd Font when `CaskaydiaCoveNerdFont-Regular.ttf` is in the user or system font folder (the installers
 put it there), plain Unicode symbols otherwise, and none in ASCII mode; `STATUS_CLI_ICONS` overrides the choice. The
-dark panel behind both rows needs 256 colors or more and gets Powerline half-circle ends with the Nerd Font.
+dark panel behind both rows needs 256 colors or more and gets Powerline triangles on its four outer corners with the Nerd Font, so both rows read as one band.
 
 Each host reports usage from its own last API response, so a terminal that has been idle for a while would show an
 older percentage than one in use. status_cli keeps the latest reading of each window in a shared file per host and

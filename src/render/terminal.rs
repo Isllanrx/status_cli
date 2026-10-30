@@ -55,7 +55,7 @@ const VTE_TRUECOLOR: u32 = 3600;
 const NERD_FONT: &str = "CaskaydiaCoveNerdFont-Regular.ttf";
 const NERD_ICONS: [char; 4] = ['\u{f06a9}', '\u{f0150}', '\u{f00ed}', '\u{f01bc}'];
 const NERD_TIMER: char = '\u{f051b}';
-const NERD_CAPS: (char, char) = ('\u{e0b6}', '\u{e0b4}');
+const NERD_CORNERS: [(char, char); 2] = [('\u{e0ba}', '\u{e0b8}'), ('\u{e0be}', '\u{e0bc}')];
 const PLAIN_ICONS: [char; 4] = ['◆', '◷', '▦', '≡'];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -90,8 +90,8 @@ impl Icons {
         }
     }
 
-    pub fn rounded(self) -> Option<(char, char)> {
-        (self == Icons::Nerd).then_some(NERD_CAPS)
+    pub fn corners(self, top: bool) -> Option<(char, char)> {
+        (self == Icons::Nerd).then_some(NERD_CORNERS[usize::from(!top)])
     }
 
     fn pick(self, slot: usize) -> Option<char> {
@@ -263,6 +263,13 @@ mod tests {
         assert_eq!(caps_for(&[("LOCALAPPDATA", &local)]).icons, Icons::Nerd);
         assert_eq!(caps_for(&[("LOCALAPPDATA", &local), ("STATUS_CLI_ICONS", "plain")]).icons, Icons::Plain);
         std::fs::remove_dir_all(&fonts).unwrap();
+    }
+
+    #[test]
+    fn only_the_outer_corners_of_the_panel_are_cut() {
+        assert_eq!(Icons::Nerd.corners(true), Some(('\u{e0ba}', '\u{e0b8}')));
+        assert_eq!(Icons::Nerd.corners(false), Some(('\u{e0be}', '\u{e0bc}')));
+        assert_eq!(Icons::Plain.corners(true), None);
     }
 
     #[test]
