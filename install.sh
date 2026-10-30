@@ -65,5 +65,31 @@ case ":$PATH:" in
     ;;
 esac
 
+install_font() {
+  version="v3.5.1"
+  archive="CascadiaCode.tar.xz"
+  case "$(uname -s)" in
+    Darwin) font_dir="$HOME/Library/Fonts" ;;
+    *) font_dir="$HOME/.local/share/fonts" ;;
+  esac
+  [ -f "$font_dir/CaskaydiaCoveNerdFont-Regular.ttf" ] && return 0
+  url="https://github.com/ryanoasis/nerd-fonts/releases/download/$version"
+  fetch "$url/$archive" "$tmp/$archive" || return 1
+  fetch "$url/SHA-256.txt" "$tmp/SHA-256.txt" || return 1
+  expected="$(awk -v name="*$archive" '$2 == name || $2 == substr(name, 2) { print $1 }' "$tmp/SHA-256.txt")"
+  [ -n "$expected" ] && [ "$(digest "$tmp/$archive")" = "$expected" ] || return 1
+  mkdir -p "$tmp/font" "$font_dir"
+  tar -xJf "$tmp/$archive" -C "$tmp/font" 2>/dev/null || return 1
+  for style in Regular Bold Italic BoldItalic; do
+    cp "$tmp/font/CaskaydiaCoveNerdFont-$style.ttf" "$font_dir/" || return 1
+  done
+  if command -v fc-cache >/dev/null 2>&1; then fc-cache -f "$font_dir" >/dev/null 2>&1 || true; fi
+  echo "Installed CaskaydiaCove Nerd Font $version to $font_dir; select it in your terminal to see the icons"
+}
+
+if [ -z "${STATUS_CLI_NO_FONT:-}" ]; then
+  install_font || echo "status_cli: Nerd Font not installed; the status line uses plain symbols instead of icons" >&2
+fi
+
 "$bin_dir/status_cli" setup
 echo "Done. Open a new Claude Code or agy session to see the status line."
