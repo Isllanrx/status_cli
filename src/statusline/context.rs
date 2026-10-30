@@ -1,15 +1,10 @@
+use crate::claude::AutoCompact;
 use crate::i18n::labels;
 use crate::render::style::{Frame, Gauge};
 use crate::shared::payload::{Host, Payload};
 use crate::shared::state::{Motion, Session};
 
 const AUTOCOMPACT_BUFFER: f64 = 33_000.0;
-
-#[derive(Clone, Copy, Default)]
-pub struct AutoCompact {
-    pub window: Option<f64>,
-    pub percent: Option<f64>,
-}
 
 pub struct Context {
     label: &'static str,
@@ -19,11 +14,11 @@ pub struct Context {
 pub fn read(payload: &Payload, auto_compact: AutoCompact, session: &mut Session) -> Context {
     let window = payload.context_window.as_ref();
     let (label, pct) = match payload.host() {
-        Host::Claude => (
+        Host::Claude if auto_compact.enabled => (
             labels().compact,
             window.and_then(|w| compact_progress(w.used_percentage?, w.context_window_size?, auto_compact)),
         ),
-        Host::Agy | Host::Codex => (labels().context, window.and_then(|w| w.used_percentage)),
+        _ => (labels().context, window.and_then(|w| w.used_percentage)),
     };
     Context { label, motion: session.track(label, pct) }
 }
@@ -64,16 +59,19 @@ mod tests {
 
     #[test]
     fn override_only_lowers_the_threshold() {
-        assert_eq!(compact_progress(40.0, 200_000.0, AutoCompact { window: None, percent: Some(50.0) }), Some(80.0));
         assert_eq!(
-            compact_progress(40.0, 200_000.0, AutoCompact { window: None, percent: Some(99.0) }),
+            compact_progress(40.0, 200_000.0, AutoCompact { percent: Some(50.0), ..AutoCompact::default() }),
+            Some(80.0)
+        );
+        assert_eq!(
+            compact_progress(40.0, 200_000.0, AutoCompact { percent: Some(99.0), ..AutoCompact::default() }),
             compact_progress(40.0, 200_000.0, AutoCompact::default())
         );
     }
 
     #[test]
     fn a_smaller_auto_compact_window_moves_the_threshold() {
-        let window = AutoCompact { window: Some(100_000.0), percent: None };
+        let window = AutoCompact { window: Some(100_000.0), ..AutoCompact::default() };
         assert_eq!(compact_progress(30.0, 200_000.0, window).map(f64::round), Some(90.0));
         let full_1m = compact_progress(96.7, 1_000_000.0, AutoCompact::default()).map(f64::round);
         assert_eq!(full_1m, Some(100.0));
@@ -82,6 +80,19 @@ mod tests {
     #[test]
     fn tiny_windows_have_no_threshold() {
         assert_eq!(compact_progress(10.0, 1_000.0, AutoCompact::default()), None);
+    }
+
+    #[test]
+    fn a_saved_600k_window_measures_against_its_threshold() {
+        let window = AutoCompact { window: Some(600_000.0), ..AutoCompact::default() };
+        let used = 219_371.0 / 1_000_000.0 * 100.0;
+        assert_eq!(compact_progress(used, 1_000_000.0, window).map(|p| (p * 10.0).round() / 10.0), Some(38.7));
+    }
+
+    #[test]
+    fn claude_without_auto_compact_shows_raw_context() {
+        let json = r#"{"context_window":{"used_percentage":48,"context_window_size":200000}}"#;
+        assert_eq!(line(json, AutoCompact { enabled: false, ..AutoCompact::default() }), "contexto 48%");
     }
 
     #[test]

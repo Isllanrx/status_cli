@@ -22,7 +22,13 @@ pub struct Payload {
     pub quota: Option<BTreeMap<String, Quota>>,
     pub context_window: Option<ContextWindow>,
     pub cost: Option<Cost>,
+    pub workspace: Option<Workspace>,
     pub terminal_width: Option<usize>,
+}
+
+#[derive(Clone, Default, Deserialize)]
+pub struct Workspace {
+    pub project_dir: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize)]

@@ -1,3 +1,4 @@
+mod claude;
 mod codex;
 mod i18n;
 mod install;
@@ -16,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use codex::wrap;
 use install::{setup, update};
 use render::style;
-use shared::payload::{self, Payload};
+use shared::payload::{self, Host, Payload};
 use shared::state::Session;
 use shared::telemetry::{self, Event, Timer};
 use statusline::layout::Line;
@@ -192,10 +193,7 @@ fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
         quotas: quota::read(payload, now, session),
         context: context::read(
             payload,
-            context::AutoCompact {
-                window: env_number("CLAUDE_CODE_AUTO_COMPACT_WINDOW"),
-                percent: env_number("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"),
-            },
+            if payload.host() == Host::Claude { claude::auto_compact(payload) } else { claude::AutoCompact::default() },
             session,
         ),
         elapsed: clock::read(payload, session, now),
