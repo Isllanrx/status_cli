@@ -8,8 +8,10 @@ use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 use crate::install::hooks::{self, Event};
 use crate::install::shim;
+use crate::shared::telemetry;
 
 const OLD_CODEX_ALIAS: &str = "codex-stt";
+const QUIET_CODEX_ITEM: &str = "raw-output";
 
 enum Config {
     Json { status_line: Option<Value>, guard: Option<(&'static [Event], &'static str)> },
@@ -66,7 +68,7 @@ fn remove_old_alias(exe: &Path) -> Option<String> {
     fs::symlink_metadata(&alias).ok()?;
     let removed = fs::remove_file(&alias).or_else(|_| {
         let stale = with_suffix(&alias, ".old");
-        let _ = fs::remove_file(&stale);
+        telemetry::remove("setup.alias", &stale);
         fs::rename(&alias, &stale)
     });
     Some(match removed {
@@ -129,6 +131,9 @@ pub fn doctor() -> (Vec<String>, bool) {
     if cfg!(windows) {
         lines.push(shim::doctor());
     }
+    let errors = telemetry::recent_errors(5);
+    lines.push(format!("info    error log: {} ({} recent)", telemetry::error_log().display(), errors.len()));
+    lines.extend(errors.iter().map(|line| format!("        {line}")));
     let caps = crate::render::terminal::caps();
     lines.push(format!(
         "info    terminal: {:?} colors, {} glyphs, language {}",
@@ -268,13 +273,16 @@ fn merge_codex(existing: &str) -> Result<String, Box<dyn Error>> {
     let mut document: DocumentMut = existing.parse()?;
     let tui = document.entry("tui").or_insert(Item::Table(Table::new()));
     let tui = tui.as_table_like_mut().ok_or("[tui] in config.toml is not a table")?;
-    tui.insert("status_line", value(Array::new()));
+    tui.insert("status_line", value([QUIET_CODEX_ITEM].into_iter().collect::<Array>()));
     Ok(document.to_string())
 }
 
 fn native_line_off(text: &str) -> bool {
     text.parse::<DocumentMut>().ok().is_some_and(|document| {
-        document.get("tui").and_then(|tui| tui.get("status_line")).and_then(Item::as_array).is_some_and(Array::is_empty)
+        let items = document.get("tui").and_then(|tui| tui.get("status_line")).and_then(Item::as_array);
+        items.is_some_and(|items| {
+            items.len() == 1 && items.get(0).and_then(toml_edit::Value::as_str) == Some(QUIET_CODEX_ITEM)
+        })
     })
 }
 
@@ -302,7 +310,7 @@ mod tests {
         let after = merge_codex(before).unwrap();
         assert!(after.starts_with("# mine\nmodel = \"gpt\"\n"));
         assert!(after.contains("screen_reader_detection_done = true"));
-        assert!(after.contains("status_line = []"));
+        assert!(after.contains("status_line = [\"raw-output\"]"));
         assert!(after.contains("[tui.model_availability_nux]"));
         assert!(merge_codex(&after).unwrap() == after);
         assert!(native_line_off(&after));
@@ -311,6 +319,7 @@ mod tests {
     #[test]
     fn codex_native_line_counts_as_on_until_it_is_emptied() {
         assert!(!native_line_off(""));
+        assert!(!native_line_off("[tui]\nstatus_line = []\n"));
         assert!(!native_line_off("[tui]\nstatus_line = [\"context-used\"]\n"));
         let replaced = merge_codex("[tui]\nstatus_line = [\"model-with-reasoning\", \"weekly-limit\"]\n").unwrap();
         assert!(native_line_off(&replaced));

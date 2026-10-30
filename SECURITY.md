@@ -37,7 +37,9 @@ Knowing this helps judge whether a behavior is a vulnerability:
   when it is unset or a stock Cascadia font, after saving `settings.json.bak-status_cli`. `STATUS_CLI_NO_FONT=1`
   skips all of it.
 - **Network**: only `status_cli update` and the install scripts, which download from GitHub releases over HTTPS.
-  The status line itself never connects anywhere and sends no telemetry; `STATUS_CLI_LOG` writes a local file only.
+  The status line starts that update in the background at most once an hour (`STATUS_CLI_NO_AUTO_UPDATE=1` turns it
+  off); the update verifies the SHA-256 before swapping the binary. Nothing else connects anywhere and no telemetry
+  is sent; `status_cli.log` (errors) and `STATUS_CLI_LOG` are local files only.
 
 ## Release integrity
 

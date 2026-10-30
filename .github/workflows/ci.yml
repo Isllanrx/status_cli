@@ -10,6 +10,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   CARGO_TERM_COLOR: always
   STATUS_CLI_LANG: pt
+  STATUS_CLI_NO_AUTO_UPDATE: 1
 
 permissions:
   contents: read

@@ -1,15 +1,16 @@
-use std::fs;
 use std::path::Path;
 
+use crate::shared::telemetry;
 use serde_json::Value;
 
 const DEFAULT_EFFECTIVE_PERCENT: f64 = 95.0;
 
 pub fn usable(home: &Path, model: &str) -> Option<f64> {
-    let cache: Value = serde_json::from_slice(&fs::read(home.join("models_cache.json")).ok()?).ok()?;
-    let configured = fs::read_to_string(home.join("config.toml"))
-        .ok()
-        .and_then(|text| text.parse::<toml_edit::DocumentMut>().ok())
+    let cache: Value = telemetry::read_json("codex.models", &home.join("models_cache.json"))?;
+    let configured = telemetry::read_optional("codex.config", &home.join("config.toml"))
+        .and_then(|bytes| {
+            telemetry::logged("codex.config", String::from_utf8_lossy(&bytes).parse::<toml_edit::DocumentMut>())
+        })
         .and_then(|config| config.get("model_context_window")?.as_integer())
         .map(|window| window as f64);
     from_cache(&cache, model, configured)

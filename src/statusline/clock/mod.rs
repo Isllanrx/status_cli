@@ -1,7 +1,7 @@
 mod process;
 
 use std::env;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -11,6 +11,7 @@ use crate::render::style::{Cell, Frame, LABEL, TRACK, VALUE, paint, title};
 use crate::render::terminal::caps;
 use crate::shared::payload::{Host, Payload};
 use crate::shared::state::Session;
+use crate::shared::telemetry;
 use crate::shared::time::parse_utc_millis;
 
 pub fn read(payload: &Payload, session: &mut Session, now: u64) -> Option<u64> {
@@ -42,8 +43,14 @@ fn conversation_started(payload: &Payload) -> Option<u64> {
 
 fn first_created_at(transcript: &Path) -> Option<u64> {
     let mut line = String::new();
-    BufReader::new(File::open(transcript).ok()?).read_line(&mut line).ok()?;
-    let record: serde_json::Value = serde_json::from_str(&line).ok()?;
+    let file = telemetry::open_optional("clock.transcript", transcript)?;
+    telemetry::logged("clock.transcript", BufReader::new(file).read_line(&mut line))?;
+    if line.trim().is_empty() {
+        return None;
+    }
+    let parsed =
+        serde_json::from_str::<serde_json::Value>(&line).map_err(|err| format!("{}: {err}", transcript.display()));
+    let record = telemetry::logged("clock.transcript", parsed)?;
     parse_utc_millis(record["created_at"].as_str()?)
 }
 

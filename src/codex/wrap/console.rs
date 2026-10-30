@@ -34,7 +34,7 @@ mod platform {
 
     impl Drop for Mode {
         fn drop(&mut self) {
-            let _ = crossterm::terminal::disable_raw_mode();
+            crate::shared::telemetry::logged("codex.console", crossterm::terminal::disable_raw_mode());
             set(STD_INPUT_HANDLE, self.input);
             set(STD_OUTPUT_HANDLE, self.output);
         }
@@ -56,7 +56,7 @@ mod platform {
 
     impl Drop for Mode {
         fn drop(&mut self) {
-            let _ = crossterm::terminal::disable_raw_mode();
+            crate::shared::telemetry::logged("codex.console", crossterm::terminal::disable_raw_mode());
         }
     }
 }

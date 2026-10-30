@@ -19,6 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use codex::wrap;
 use install::{setup, update};
 use render::style;
+use shared::cache_dir;
 use shared::payload::{self, Host, Payload};
 use shared::state::Session;
 use shared::telemetry::{self, Event, Timer};
@@ -46,6 +47,7 @@ fn main() {
         Some("update") => match update::run() {
             Ok(message) => return println!("{message}"),
             Err(err) => {
+                telemetry::error("update", &err);
                 eprintln!("status_cli: {err}");
                 std::process::exit(1);
             }
@@ -53,6 +55,7 @@ fn main() {
         Some("agy-groups") => match agy::refresh(&cache_dir(), now_millis()) {
             Ok(message) => return println!("{message}"),
             Err(err) => {
+                telemetry::error("agy.refresh", &err);
                 eprintln!("status_cli: {err}");
                 std::process::exit(1);
             }
@@ -93,10 +96,14 @@ fn main() {
             timer.mark("state_save");
             output
         }
-        Err(err) => format!("status_cli: {err}"),
+        Err(err) => {
+            telemetry::error("payload", err);
+            format!("status_cli: {err}")
+        }
     };
-    let _ = io::stdout().lock().write_all(output.as_bytes());
+    telemetry::logged("stdout", io::stdout().lock().write_all(output.as_bytes()));
     timer.mark("stdout");
+    update::auto(&cache_dir(), now);
 
     if let Some(path) = env::var_os("STATUS_CLI_LOG") {
         let error = payload.as_ref().err().map(ToString::to_string);
@@ -116,7 +123,7 @@ fn main() {
 }
 
 fn run_shim(args: Vec<String>) {
-    let shim = env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let shim = telemetry::logged("shim", env::current_exe()).and_then(|exe| exe.parent().map(Path::to_path_buf));
     if env::var_os(codex::GUARD_VAR).is_some() || env::var_os(codex::SHIM_VAR).is_some() {
         let launch = codex::command(&args, shim.as_deref());
         let status = Command::new(&launch.program).args(&launch.args).envs(launch.env.iter().cloned()).status();
@@ -125,7 +132,8 @@ fn run_shim(args: Vec<String>) {
     if let Some(dir) = &shim
         && let Some(exe) = codex::installed_status_cli(dir)
     {
-        if let Ok(status) = Command::new(&exe).arg("codex").args(&args).env(codex::SHIM_VAR, dir).status() {
+        let forwarded = Command::new(&exe).arg("codex").args(&args).env(codex::SHIM_VAR, dir).status();
+        if let Some(status) = telemetry::logged("shim.forward", forwarded) {
             std::process::exit(status.code().unwrap_or(1));
         }
     }
@@ -136,6 +144,7 @@ fn exit_with(status: io::Result<ExitStatus>, program: &str) -> ! {
     match status {
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),
         Err(err) => {
+            telemetry::error("launch", format_args!("{program}: {err}"));
             eprintln!("status_cli: could not start {program}: {err}");
             std::process::exit(1);
         }
@@ -160,7 +169,10 @@ fn run_codex(args: Vec<String>, shim: Option<PathBuf>) {
         let now = now_millis();
         let mut payload = match reader.read(now) {
             Ok(payload) => payload,
-            Err(err) => return format!("status_cli: {err}"),
+            Err(err) => {
+                telemetry::error("codex.reader", &err);
+                return format!("status_cli: {err}");
+            }
         };
         payload.terminal_width = columns;
         let payload = payload.validated();
@@ -185,8 +197,8 @@ fn run_codex(args: Vec<String>, shim: Option<PathBuf>) {
             let mut stdout = io::stdout().lock();
             let frame = render(terminal_width());
             let (status, credit) = frame.split_once('\n').unwrap_or((&frame, ""));
-            let _ = write!(stdout, "\r\x1b[2K{status}\n\r\x1b[2K{credit}\x1b[1A\r");
-            let _ = stdout.flush();
+            let written = write!(stdout, "\r\x1b[2K{status}\n\r\x1b[2K{credit}\x1b[1A\r").and_then(|()| stdout.flush());
+            telemetry::logged("codex.watch", written);
             drop(stdout);
             thread::sleep(Duration::from_millis(1000 - now_millis() % 1000));
         }
@@ -194,6 +206,7 @@ fn run_codex(args: Vec<String>, shim: Option<PathBuf>) {
     match wrap::run(&launch, |columns| render(Some(columns))) {
         Ok(code) => std::process::exit(code),
         Err(err) => {
+            telemetry::error("codex.wrap", format_args!("{}: {err}", launch.program));
             eprintln!("status_cli: could not start {}: {err}", launch.program);
             std::process::exit(1);
         }
@@ -256,16 +269,7 @@ fn agy_groups(payload: &Payload, now: u64) -> Option<agy::Groups> {
     agy::load(&cache_dir(), buckets, now)
 }
 
-fn cache_dir() -> PathBuf {
-    let base = ["XDG_RUNTIME_DIR", "LOCALAPPDATA", "XDG_CACHE_HOME"]
-        .into_iter()
-        .find_map(env::var_os)
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
-        .unwrap_or_else(env::temp_dir);
-    base.join("status_cli")
-}
-
 fn env_number(name: &str) -> Option<f64> {
-    env::var(name).ok()?.trim().parse().ok()
+    let value = env::var(name).ok()?;
+    telemetry::logged("env", value.trim().parse().map_err(|err| format!("{name}={value}: {err}")))
 }

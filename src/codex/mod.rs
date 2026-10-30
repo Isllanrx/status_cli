@@ -15,6 +15,7 @@ use std::time::SystemTime;
 use serde_json::Value;
 
 use crate::shared::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Window};
+use crate::shared::telemetry;
 use crate::shared::time::parse_utc_millis;
 
 const TAIL_BYTES: u64 = 256 * 1024;
@@ -194,14 +195,19 @@ fn codex_home() -> Option<PathBuf> {
 }
 
 fn configured_model(home: &Path) -> Option<(String, Option<String>)> {
-    let config: toml_edit::DocumentMut = fs::read_to_string(home.join("config.toml")).ok()?.parse().ok()?;
+    let path = home.join("config.toml");
+    let text = String::from_utf8_lossy(&telemetry::read_optional("codex.config", &path)?).into_owned();
+    let parsed = text.parse::<toml_edit::DocumentMut>().map_err(|err| format!("{}: {err}", path.display()));
+    let config = telemetry::logged("codex.config", parsed)?;
     let model = config.get("model")?.as_str()?.to_owned();
     Some((model, config.get("model_reasoning_effort").and_then(|e| e.as_str()).map(str::to_owned)))
 }
 
 fn before_first_message(home: &Path) -> Payload {
     let mut payload = latest_session(&home.join("sessions"))
-        .and_then(|file| parse_session(&file).ok())
+        .and_then(|file| {
+            telemetry::logged("codex.session", parse_session(&file).map_err(|err| format!("{}: {err}", file.display())))
+        })
         .unwrap_or_else(|| Payload { product: Some("codex".to_owned()), ..Payload::default() });
     payload.context_window = None;
     if let Some((model, effort)) = configured_model(home) {
@@ -251,7 +257,12 @@ fn tail_records(file: &Path) -> Result<Vec<Value>, Box<dyn Error>> {
     if start > 0 {
         lines.next();
     }
-    Ok(lines.filter_map(|line| serde_json::from_str(line).ok()).collect())
+    let records: Vec<Option<Value>> = lines.map(|line| serde_json::from_str(line).ok()).collect();
+    let broken = records.iter().rev().skip(1).filter(|record| record.is_none()).count();
+    if broken > 0 {
+        telemetry::error("codex.rollout", format_args!("{}: {broken} unreadable lines", file.display()));
+    }
+    Ok(records.into_iter().flatten().collect())
 }
 
 fn session_meta(file: &Path) -> Option<Meta> {

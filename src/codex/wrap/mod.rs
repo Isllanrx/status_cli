@@ -17,6 +17,7 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use stream::{STATUS_ROWS, Stream};
 
 use super::launch::Launch;
+use crate::shared::telemetry;
 
 const MIN_ROWS: u16 = STATUS_ROWS + 2;
 const TICK: Duration = Duration::from_millis(250);
@@ -34,7 +35,7 @@ pub fn run(launch: &Launch, mut status: impl FnMut(usize) -> String) -> Result<i
     let direct = || -> Result<i32, Box<dyn Error>> {
         Ok(Command::new(program).args(args).envs(env.iter().cloned()).status()?.code().unwrap_or(1))
     };
-    let size = terminal::size().ok().filter(|(_, rows)| *rows >= MIN_ROWS);
+    let size = telemetry::logged("codex.terminal", terminal::size()).filter(|(_, rows)| *rows >= MIN_ROWS);
     let Some((cols, rows)) = size.filter(|_| io::stdin().is_terminal() && io::stdout().is_terminal()) else {
         return direct();
     };
@@ -97,13 +98,13 @@ pub fn run(launch: &Launch, mut status: impl FnMut(usize) -> String) -> Result<i
         }
     });
     thread::spawn(move || {
-        let code = child.wait().map_or(1, |status| status.exit_code());
+        let code = telemetry::logged("codex.child", child.wait()).map_or(1, |status| status.exit_code());
         let _ = sender.send(Event::Exit(code));
     });
 
     let code = pump(&events, &mut stream, &mut stdout, &mut status, |cols, rows| {
         status_row.store(rows - STATUS_ROWS + 1, Ordering::Relaxed);
-        let _ = pair.master.resize(pty_size(cols, rows));
+        telemetry::logged("codex.pty", pair.master.resize(pty_size(cols, rows)));
     });
     stdout.write_all(&stream.release())?;
     stdout.flush()?;
@@ -126,17 +127,17 @@ fn pump(
     loop {
         match events.recv_timeout(if exit.is_some() { DRAIN } else { QUIET }) {
             Ok(Event::Output(bytes)) => {
-                let _ = stdout.write_all(&stream.child_output(&bytes));
+                telemetry::logged("codex.stdout", stdout.write_all(&stream.child_output(&bytes)));
                 last_output = Instant::now();
                 awaiting_redraw = false;
                 dirty = true;
             }
             Ok(Event::Tick) => {
-                if let Ok((cols, rows)) = terminal::size()
+                if let Some((cols, rows)) = telemetry::logged("codex.terminal", terminal::size())
                     && rows >= MIN_ROWS
                     && (cols, rows) != (stream.cols, stream.rows)
                 {
-                    let _ = stdout.write_all(&stream.resize(cols, rows));
+                    telemetry::logged("codex.stdout", stdout.write_all(&stream.resize(cols, rows)));
                     resize(cols, rows);
                     awaiting_redraw = true;
                 }
@@ -149,10 +150,10 @@ fn pump(
             Err(RecvTimeoutError::Disconnected) => return exit.unwrap_or(1),
         }
         if dirty && !awaiting_redraw && last_output.elapsed() >= QUIET && stream.can_draw() {
-            let _ = stdout.write_all(&stream.status(&line));
+            telemetry::logged("codex.stdout", stdout.write_all(&stream.status(&line)));
             dirty = false;
         }
-        let _ = stdout.flush();
+        telemetry::logged("codex.stdout", stdout.flush());
     }
 }
 

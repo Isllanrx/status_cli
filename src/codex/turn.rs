@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+use crate::shared::telemetry;
 use serde_json::Value;
 
 const MARKER: &[u8] = b"\"turn_context\"";
@@ -18,8 +19,9 @@ impl Turns {
         if self.file.as_deref() != Some(file) {
             *self = Turns { file: Some(file.to_path_buf()), ..Turns::default() };
         }
-        if let Ok(mut handle) = File::open(file)
-            && handle.seek(SeekFrom::Start(self.offset)).is_ok()
+        let opened = File::open(file).and_then(|mut handle| handle.seek(SeekFrom::Start(self.offset)).map(|_| handle));
+        if let Some(handle) =
+            telemetry::logged("codex.turns", opened.map_err(|err| format!("{}: {err}", file.display())))
         {
             let mut reader = BufReader::new(handle);
             let mut line = Vec::new();

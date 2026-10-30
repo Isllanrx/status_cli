@@ -1,13 +1,18 @@
 use std::env;
 use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::io::ErrorKind;
+use std::path::{Component, Path};
+use std::process::{Command, Stdio};
 
+use crate::shared::telemetry;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 const REPO: &str = "Isllanrx/status_cli";
 const MAX_SECONDS: &str = "120";
+const AUTO_EVERY_MS: u64 = 60 * 60 * 1000;
+const AUTO_STAMP: &str = "auto-update.stamp";
+pub const NO_AUTO_UPDATE: &str = "STATUS_CLI_NO_AUTO_UPDATE";
 
 #[derive(Deserialize)]
 struct Release {
@@ -38,6 +43,46 @@ pub fn run() -> Result<String, String> {
     let target = env::current_exe().map_err(|err| format!("cannot locate the running binary: {err}"))?;
     replace(&target, &binary)?;
     Ok(format!("Updated status_cli {current} -> {latest} at {}", target.display()))
+}
+
+pub fn auto(dir: &Path, now: u64) {
+    if env::var_os(NO_AUTO_UPDATE).is_some() {
+        return;
+    }
+    let stamp = dir.join(AUTO_STAMP);
+    let last = telemetry::read_optional("update.auto", &stamp)
+        .and_then(|bytes| String::from_utf8_lossy(&bytes).split_whitespace().next()?.parse::<u64>().ok());
+    if !due(last, now) {
+        return;
+    }
+    let Some(exe) = telemetry::logged("update.auto", env::current_exe()) else { return };
+    if exe.components().any(|part| part == Component::Normal("target".as_ref())) {
+        return;
+    }
+    let claim = format!("{now} {}", std::process::id());
+    let written = fs::create_dir_all(dir).and_then(|()| fs::write(&stamp, &claim));
+    if telemetry::logged("update.auto", written.map_err(|err| format!("{}: {err}", stamp.display()))).is_none()
+        || fs::read_to_string(&stamp).ok().as_deref() != Some(claim.as_str())
+    {
+        return;
+    }
+    crate::shared::spawn_detached("update.auto", || {
+        let mut command = Command::new(&exe);
+        command.arg("update").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        command
+    });
+}
+
+fn due(last: Option<u64>, now: u64) -> bool {
+    last.is_none_or(|at| now.saturating_sub(at) >= AUTO_EVERY_MS || at > now)
+}
+
+fn discard_old(old: &Path) {
+    if let Err(err) = fs::remove_file(old)
+        && !matches!(err.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied)
+    {
+        telemetry::error("update", format_args!("{}: {err}", old.display()));
+    }
 }
 
 fn fetch(url: &str) -> Result<Vec<u8>, String> {
@@ -81,7 +126,7 @@ fn hex(bytes: &[u8]) -> String {
 fn replace(target: &Path, binary: &[u8]) -> Result<(), String> {
     let staged = target.with_extension("new");
     let old = target.with_extension("old");
-    let _ = fs::remove_file(&old);
+    discard_old(&old);
     fs::write(&staged, binary).map_err(|err| format!("cannot write {}: {err}", staged.display()))?;
     #[cfg(unix)]
     {
@@ -91,7 +136,7 @@ fn replace(target: &Path, binary: &[u8]) -> Result<(), String> {
     }
     let runs = Command::new(&staged).arg("--version").output().is_ok_and(|out| out.status.success());
     if !runs {
-        let _ = fs::remove_file(&staged);
+        telemetry::remove("update", &staged);
         return Err(format!("downloaded binary does not run on this system: {}", staged.display()));
     }
     if cfg!(windows) {
@@ -99,18 +144,29 @@ fn replace(target: &Path, binary: &[u8]) -> Result<(), String> {
     }
     if let Err(err) = fs::rename(&staged, target) {
         if cfg!(windows) {
-            let _ = fs::rename(&old, target);
+            telemetry::logged(
+                "update.rollback",
+                fs::rename(&old, target).map_err(|err| format!("{}: {err}", target.display())),
+            );
         }
-        let _ = fs::remove_file(&staged);
+        telemetry::remove("update", &staged);
         return Err(format!("cannot install {}: {err}", target.display()));
     }
-    let _ = fs::remove_file(&old);
+    discard_old(&old);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checks_for_a_new_release_at_most_once_an_hour() {
+        assert!(due(None, 0));
+        assert!(!due(Some(1_000), 1_000 + AUTO_EVERY_MS - 1));
+        assert!(due(Some(1_000), 1_000 + AUTO_EVERY_MS));
+        assert!(due(Some(5_000), 1_000));
+    }
 
     #[test]
     fn compares_versions_numerically() {

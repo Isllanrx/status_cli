@@ -22,9 +22,14 @@ impl TempDir {
         let mut names: Vec<_> = fs::read_dir(self.0.join("status_cli"))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| !name.starts_with("status_cli.log"))
             .collect();
         names.sort();
         names
+    }
+
+    pub fn errors(&self) -> String {
+        fs::read_to_string(self.0.join("status_cli").join("status_cli.log")).unwrap_or_default()
     }
 }
 
@@ -62,6 +67,7 @@ pub fn run_with(temp: &TempDir, input: &str, columns: Option<usize>, vars: &[(&s
         .env_remove("STATUS_CLI_LOG")
         .env("STATUS_CLI_LANG", "pt")
         .env("STATUS_CLI_ICONS", "plain")
+        .env("STATUS_CLI_NO_AUTO_UPDATE", "1")
         .env_remove("STATUS_CLI_COLOR")
         .env_remove("STATUS_CLI_ASCII")
         .env_remove("NO_COLOR")

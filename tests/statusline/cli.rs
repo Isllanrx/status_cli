@@ -129,6 +129,8 @@ fn no_columns_means_no_padding() {
 fn invalid_json_prints_a_short_error() {
     let temp = TempDir::new();
     assert!(run(&temp, "{broken", None).text.starts_with("status_cli: "));
+    let errors = temp.errors();
+    assert!(errors.contains("\"scope\":\"payload\"") && errors.contains("\"version\""), "{errors}");
 }
 
 #[test]

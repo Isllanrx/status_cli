@@ -71,7 +71,10 @@ fn filetime_millis(time: windows_sys::Win32::Foundation::FILETIME) -> Option<u64
 
 #[cfg(unix)]
 fn snapshot(now: u64) -> Option<(Table, impl Fn(u32) -> Option<u64>)> {
-    let out = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid=,etime=,comm="]).output().ok()?;
+    let out = crate::shared::telemetry::logged(
+        "clock.ps",
+        std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid=,etime=,comm="]).output(),
+    )?;
     let row = |line: &str| -> Option<(u32, u64, Entry)> {
         let mut fields = line.split_whitespace();
         let pid = fields.next()?.parse().ok()?;

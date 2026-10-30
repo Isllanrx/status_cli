@@ -1,3 +1,4 @@
+use crate::shared::telemetry;
 use std::env;
 use std::fs;
 use std::io::{self, ErrorKind};
@@ -56,7 +57,7 @@ fn copy(exe: &Path, shim: &Path) -> io::Result<()> {
     fs::create_dir_all(shim.parent().ok_or(ErrorKind::NotFound)?)?;
     if shim.exists() && fs::remove_file(shim).is_err() {
         let stale = shim.with_extension("old");
-        let _ = fs::remove_file(&stale);
+        telemetry::remove("shim.copy", &stale);
         fs::rename(shim, &stale)?;
     }
     fs::copy(exe, shim).map(drop)

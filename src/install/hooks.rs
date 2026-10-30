@@ -62,7 +62,7 @@ pub fn agy_plugin(command: &str) -> (String, String) {
 }
 
 fn pretty(value: &Value) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_default() + "\n"
+    format!("{value:#}\n")
 }
 
 #[cfg(test)]

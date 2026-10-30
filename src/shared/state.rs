@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use crate::shared::telemetry;
 use serde::{Deserialize, Serialize};
 
 pub const FILE_PREFIX: &str = "status_cli-";
@@ -115,12 +116,12 @@ impl Session {
         if self.current == self.saved {
             return;
         }
-        let Ok(json) = serde_json::to_string(&self.current) else { return };
+        let Some(json) = telemetry::logged("state.save", serde_json::to_string(&self.current)) else { return };
         let written = write_atomic(file, json.as_bytes()).or_else(|_| {
             fs::create_dir_all(file.parent().ok_or(io::ErrorKind::NotFound)?)?;
             write_atomic(file, json.as_bytes())
         });
-        if written.is_ok() {
+        if telemetry::logged("state.save", written.map_err(|err| format!("{}: {err}", file.display()))).is_some() {
             self.saved = self.current.clone();
         }
     }
@@ -142,13 +143,13 @@ pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
     fs::write(&staging, bytes)?;
     let renamed = fs::rename(&staging, file).or_else(|_| fs::rename(&staging, file));
     if renamed.is_err() {
-        let _ = fs::remove_file(&staging);
+        telemetry::remove("state.save", &staging);
     }
     renamed
 }
 
 fn load(file: &Path) -> Option<Snapshot> {
-    serde_json::from_slice(&fs::read(file).ok()?).ok()
+    telemetry::read_json("state.load", file)
 }
 
 fn prune(dir: &Path) {
@@ -159,7 +160,7 @@ fn prune(dir: &Path) {
         }
         let modified = entry.metadata().and_then(|m| m.modified());
         if modified.is_ok_and(|m| SystemTime::now().duration_since(m).unwrap_or_default() > TTL) {
-            let _ = fs::remove_file(entry.path());
+            telemetry::remove("state.prune", &entry.path());
         }
     }
 }

@@ -9,6 +9,7 @@ use crate::i18n::{ALL, labels};
 use crate::render::style::duration;
 use crate::shared::payload::{Host, Payload, Window};
 use crate::shared::state::{self, Reading};
+use crate::shared::telemetry;
 
 const MAX_INPUT_BYTES: u64 = 1 << 20;
 const SESSION: Limits = Limits { near: 85.0, reached: 95.0 };
@@ -55,12 +56,14 @@ pub fn host(name: &str) -> Option<Host> {
 
 pub fn run(host: Host, dir: &Path, now: u64) -> Option<String> {
     let mut bytes = Vec::new();
-    let reply = io::stdin()
-        .lock()
-        .take(MAX_INPUT_BYTES)
-        .read_to_end(&mut bytes)
-        .ok()
-        .and_then(|_| serde_json::from_slice::<Input>(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes)).ok())
+    let input =
+        io::stdin().lock().take(MAX_INPUT_BYTES).read_to_end(&mut bytes).map_err(|err| err.to_string()).and_then(
+            |_| {
+                serde_json::from_slice::<Input>(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes))
+                    .map_err(|err| err.to_string())
+            },
+        );
+    let reply = telemetry::logged("guard.input", input)
         .and_then(|input| respond(host, &input, &usage(host, &input, dir, now)?, now));
     reply.or_else(|| (host == Host::Agy).then(|| "{}".to_owned()))
 }
@@ -70,9 +73,9 @@ fn usage(host: Host, input: &Input, dir: &Path, now: u64) -> Option<Usage> {
         let payload = input
             .transcript_path
             .as_deref()
-            .and_then(|path| codex::parse_session(Path::new(path)).ok())
+            .and_then(|path| telemetry::logged("guard.session", codex::parse_session(Path::new(path))))
             .filter(|payload| payload.rate_limits.is_some())
-            .or_else(|| codex::Reader::latest().read(now).ok())?
+            .or_else(|| telemetry::logged("guard.session", codex::Reader::latest().read(now)))?
             .validated();
         let limits = payload.rate_limits?;
         let reading = |window: Option<Window>| {

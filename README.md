@@ -11,7 +11,7 @@
 Status line for [Claude Code](https://code.claude.com/docs/en/statusline), the
 [Antigravity CLI](https://www.antigravity.google/docs/cli/statusline) (`agy`) and the
 [Codex CLI](https://github.com/openai/codex): usage limits, context and session time at the bottom of the terminal.
-One Rust binary, no runtime, no network calls while it runs.
+One Rust binary, no runtime. The line itself never waits on the network; new releases install in the background.
 
 ![status_cli in Codex, Claude Code and the Antigravity CLI](assets/cli.png)
 
@@ -79,6 +79,7 @@ bars and icons go, then whole columns from the right.
 | `STATUS_CLI_NO_SHIM` | `setup` leaves `codex` alone |
 | `STATUS_CLI_NO_FONT` | The installer skips the Nerd Font |
 | `STATUS_CLI_LOG` | Local JSON Lines log of each run |
+| `STATUS_CLI_NO_AUTO_UPDATE` | No hourly background update |
 
 ## More
 

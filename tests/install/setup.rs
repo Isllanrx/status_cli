@@ -83,7 +83,7 @@ fn setup_turns_off_the_native_codex_line_without_losing_settings() {
     let config = fs::read_to_string(codex.join("config.toml")).unwrap();
     assert!(config.starts_with("model = \"gpt-6\""), "{config}");
     assert!(config.contains("screen_reader_detection_done = true"));
-    assert!(config.contains("status_line = []"), "{config}");
+    assert!(config.contains("status_line = [\"raw-output\"]"), "{config}");
     assert!(codex.join("config.toml.bak-status_cli").exists());
 }
 

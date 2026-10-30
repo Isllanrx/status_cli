@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::shared::payload::Payload;
+use crate::shared::telemetry;
 
 const MIN_WINDOW: f64 = 100_000.0;
 const MAX_WINDOW: f64 = 1_000_000.0;
@@ -25,7 +26,7 @@ impl Default for AutoCompact {
 pub fn auto_compact(payload: &Payload) -> AutoCompact {
     let project = payload.workspace.as_ref().and_then(|w| w.project_dir.as_deref()).map(Path::new);
     let settings: Vec<Value> =
-        settings_files(project).iter().filter_map(|file| serde_json::from_slice(&fs::read(file).ok()?).ok()).collect();
+        settings_files(project).iter().filter_map(|file| telemetry::read_json("claude.settings", file)).collect();
     let model = payload.model.as_ref().and_then(|m| m.id.as_deref()).map(canonical);
     resolve(&settings, model.as_deref(), |name| env::var(name).ok())
 }
@@ -37,7 +38,10 @@ fn resolve(settings: &[Value], model: Option<&str>, var: impl Fn(&str) -> Option
         .as_deref()
         .and_then(env_window)
         .or_else(|| settings.iter().find_map(|s| saved_window(s, model)).flatten());
-    let percent = var("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE").and_then(|value| value.trim().parse().ok());
+    let percent = var("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE").and_then(|value| {
+        let parsed = value.trim().parse().map_err(|err| format!("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE={value}: {err}"));
+        telemetry::logged("claude.env", parsed)
+    });
     AutoCompact { enabled: enabled && !disabled, window, percent }
 }
 

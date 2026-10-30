@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::shared::state::write_atomic;
+use crate::shared::telemetry;
 
 const FILE: &str = "agy-quota-groups.json";
 const LOCK: &str = "agy-quota-groups.lock";
@@ -63,7 +64,7 @@ impl Groups {
 }
 
 pub fn load<'a>(dir: &Path, buckets: impl IntoIterator<Item = &'a str>, now: u64) -> Option<Groups> {
-    let cached: Option<Groups> = fs::read(dir.join(FILE)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let cached: Option<Groups> = telemetry::read_json("agy.groups", &dir.join(FILE));
     let mut buckets = buckets.into_iter();
     let stale = match &cached {
         None => true,
@@ -108,8 +109,7 @@ fn collect(child: &mut Child) -> Result<Vec<u8>, String> {
             Ok(Some(_)) => break,
             Ok(None) if started.elapsed() < TIMEOUT => thread::sleep(Duration::from_millis(200)),
             Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                telemetry::logged("agy.usage", child.kill().and_then(|()| child.wait()));
                 return Err(format!("agy /usage took longer than {}s", TIMEOUT.as_secs()));
             }
             Err(err) => return Err(err.to_string()),
@@ -155,37 +155,23 @@ fn words(text: &str) -> Vec<String> {
 
 fn refresh_in_background(dir: &Path, now: u64) {
     let lock = dir.join(LOCK);
-    let recent = fs::read_to_string(&lock)
-        .ok()
-        .and_then(|text| text.trim().parse::<u64>().ok())
+    let recent = telemetry::read_optional("agy.lock", &lock)
+        .and_then(|bytes| String::from_utf8_lossy(&bytes).trim().parse::<u64>().ok())
         .is_some_and(|at| now.saturating_sub(at) < RETRY_MS);
-    if recent || fs::create_dir_all(dir).and_then(|()| fs::write(&lock, now.to_string())).is_err() {
+    if recent {
         return;
     }
-    let Ok(exe) = env::current_exe() else { return };
+    let stamped = fs::create_dir_all(dir).and_then(|()| fs::write(&lock, now.to_string()));
+    if telemetry::logged("agy.lock", stamped.map_err(|err| format!("{}: {err}", lock.display()))).is_none() {
+        return;
+    }
+    let Some(exe) = telemetry::logged("agy.refresh", env::current_exe()) else { return };
     let command = || {
         let mut command = Command::new(&exe);
         command.arg("agy-groups").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         command
     };
-    spawn_detached(command);
-}
-
-#[cfg(windows)]
-fn spawn_detached(command: impl Fn() -> Command) {
-    use std::os::windows::process::CommandExt;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-    let flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
-    if command().creation_flags(flags | CREATE_BREAKAWAY_FROM_JOB).spawn().is_err() {
-        let _ = command().creation_flags(flags).spawn();
-    }
-}
-
-#[cfg(not(windows))]
-fn spawn_detached(command: impl Fn() -> Command) {
-    let _ = command().spawn();
+    crate::shared::spawn_detached("agy.refresh", command);
 }
 
 #[cfg(test)]

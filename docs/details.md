@@ -25,6 +25,11 @@ at the binary's full path, so `PATH` does not matter. Open a new session afterwa
 `status_cli doctor` checks the result: version, `PATH`, each host's settings and usage hooks, whether `codex`
 runs through status_cli (Windows) and the detected terminal and language. It exits with 1 when something is missing.
 
+The status line checks for a new release on its own at most once an hour: it starts a detached `status_cli update`
+in the background (one per machine, claimed through `auto-update.stamp` in the cache folder) so the line itself never
+waits on the network, and open sessions run the new binary on their next refresh. Builds running from a cargo `target`
+folder never update themselves, and `STATUS_CLI_NO_AUTO_UPDATE=1` turns it off.
+
 `status_cli update` moves to the latest GitHub release. It compares the release tag with the running version and stops
 if there is nothing newer. Otherwise it downloads that release's binary for your system with `curl`, which ships with
 Windows 10 and later, macOS and most Linux distributions. It checks the SHA-256 against the release's `SHA256SUMS`,
@@ -121,8 +126,10 @@ last row of the same terminal:
 - Codex's exit code is returned and the terminal modes are restored even if it crashes.
 
 `status_cli codex --once` prints the line once for tmux status bars or shell prompts. Setup turns off Codex's own
-status line (`[tui] status_line = []` in `config.toml`, keeping comments and other settings), so only this line is
-shown; Codex falls back to its default footer items when the key is absent.
+footer: it sets `[tui] status_line = ["raw-output"]` in `config.toml` (keeping comments and other settings). With a
+status line configured Codex drops "? for shortcuts" and "N% context left" from its footer, and `raw-output` stays empty
+unless raw scrollback mode is on, so only this line is shown. An empty list (`[]`) or a missing key brings the native
+footer back.
 
 ## What it shows
 
@@ -250,6 +257,7 @@ Everything works out of the box. These environment variables change the defaults
 | `STATUS_CLI_LANG` | Language code from the table above, such as `en`, `pt`, `zh`, `ja` or `ar` |
 | `NO_COLOR` | No colors |
 | `STATUS_CLI_LOG` | JSON Lines log with per-phase timings, host, model, effort and the rendered line |
+| `STATUS_CLI_NO_AUTO_UPDATE` | No hourly background update check |
 | `STATUS_CLI_CODEX` | Program the wrapper runs instead of the real `codex` |
 
 ## Compatibility
@@ -315,3 +323,22 @@ version, which can trail the latest release.
 ## License
 
 [MIT](../LICENSE)
+
+## Error log
+
+Failures that do not stop the line (unreadable settings or caches, broken JSON or TOML, state that could not be saved,
+background refreshes and updates that failed, terminal writes in the Codex wrapper, invalid numeric environment
+variables) are appended as JSON Lines to `status_cli.log` in the cache folder (`%LOCALAPPDATA%\status_cli` on
+Windows, `$XDG_RUNTIME_DIR/status_cli` or `~/.cache/status_cli` elsewhere). Each line has `ts`, `pid`, `version`,
+`scope` and `error`. The file rotates to `status_cli.log.1` past 1 MiB, and a process does not repeat the same error
+twice in a row. Missing optional files (a host that is not installed, a cache not written yet) are expected and not
+logged, and neither is a Windows `status_cli.old` that an open session still runs. `status_cli doctor` prints the path and the last five entries. `STATUS_CLI_LOG` is separate: it records every
+run with timings and is meant for profiling.
+
+## Colors on light and dark themes
+
+With 24-bit or 256 colors the line sits on its own dark panel with its own light text color, so it reads the same on
+light and dark terminal themes; every text color keeps at least 4.5:1 contrast against the panel. With 16 colors there
+is no panel and the terminal theme owns the palette, so status_cli only uses colors themes keep readable: the theme's
+default foreground for labels and secondary text, bright black for tracks and separators, and green, yellow, red, cyan
+and magenta for values. `STATUS_CLI_COLOR=16` forces that mode and `NO_COLOR` drops colors entirely.

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::shared::payload::{Host, Payload, RateLimits, Window};
 use crate::shared::state::write_atomic;
+use crate::shared::telemetry;
 
 const SAME_WINDOW_MS: u64 = 15 * 60_000;
 
@@ -30,13 +31,13 @@ struct Store {
 
 pub fn share(dir: &Path, payload: &Payload, now: u64) -> Payload {
     let path = file(dir, payload.host());
-    let stored: Store = fs::read(&path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+    let stored: Store = telemetry::read_json("usage.load", &path).unwrap_or_default();
     let merged = merge(&stored, payload.session_key(), readings(payload, now), now);
     if merged != stored
-        && let Ok(json) = serde_json::to_vec(&merged)
+        && let Some(json) = telemetry::logged("usage.save", serde_json::to_vec(&merged))
     {
-        let _ = fs::create_dir_all(dir);
-        let _ = write_atomic(&path, &json);
+        let written = fs::create_dir_all(dir).and_then(|()| write_atomic(&path, &json));
+        telemetry::logged("usage.save", written.map_err(|err| format!("{}: {err}", path.display())));
     }
     let mut shared = payload.clone();
     apply(&mut shared, &merged.shared, now);
