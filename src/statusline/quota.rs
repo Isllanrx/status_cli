@@ -1,5 +1,7 @@
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
+use crate::agy::{Group, Groups};
 use crate::i18n::labels;
 use crate::render::style::{Frame, Gauge, SOFT, duration, heat, paint};
 use crate::render::terminal::caps;
@@ -21,8 +23,14 @@ pub struct Quota {
     show_reset: bool,
 }
 
-pub fn read(payload: &Payload, now: u64, session: &mut Session) -> Vec<Quota> {
-    let mut quota = |label, pct, resets_at, window, show_reset| {
+type Windows<'a> = Vec<(u64, Option<&'a payload::Quota>)>;
+
+pub fn read(payload: &Payload, now: u64, session: &mut Session, groups: Option<&Groups>) -> Vec<Quota> {
+    let mut quota = |label, pct: Option<f64>, resets_at: Option<u64>, window, show_reset| {
+        let (pct, resets_at) = match resets_at {
+            Some(at) if at <= now => (pct.map(|_| 0.0), None),
+            _ => (pct, resets_at),
+        };
         let motion = session.track(label, pct);
         session.resets(label, resets_at);
         Quota { label, motion, resets_at, window, show_reset }
@@ -48,16 +56,23 @@ pub fn read(payload: &Payload, now: u64, session: &mut Session) -> Vec<Quota> {
                 .unwrap_or_default();
             let used = payload::Quota::used;
             let resets = |q: &payload::Quota| q.resets_at(now);
-            let windows = quotas.map(|q| family_windows(q, &model)).unwrap_or_default();
+            let empty = BTreeMap::new();
+            let all = quotas.unwrap_or(&empty);
+            let windows = match groups.and_then(|groups| groups.group_for(&model)) {
+                Some(group) => official_windows(all, group),
+                None => family_windows(all, &model),
+            };
             if windows.is_empty() {
                 let current = quotas.and_then(|q| pick(q, &model));
                 return vec![quota(labels().quota, current.and_then(used), current.and_then(resets), None, true)];
             }
-            windows
+            [(true, labels().session, FIVE_HOURS_MS), (false, labels().week, SEVEN_DAYS_MS)]
                 .into_iter()
-                .map(|(span, q)| {
-                    let short = span < DAY_MS;
-                    quota(if short { labels().session } else { labels().week }, used(q), resets(q), Some(span), short)
+                .map(|(short, label, default)| {
+                    let found = windows.iter().find(|(span, _)| (*span < DAY_MS) == short);
+                    let span = found.map_or(default, |(span, _)| *span);
+                    let current = found.and_then(|(_, q)| *q);
+                    quota(label, current.and_then(used), current.and_then(resets), Some(span), short)
                 })
                 .collect()
         }
@@ -80,7 +95,15 @@ fn window_span(window: &str) -> Option<u64> {
     }
 }
 
-fn family_windows<'a>(quotas: &'a BTreeMap<String, payload::Quota>, model: &str) -> Vec<(u64, &'a payload::Quota)> {
+fn official_windows<'a>(quotas: &'a BTreeMap<String, payload::Quota>, group: &Group) -> Windows<'a> {
+    group
+        .buckets
+        .iter()
+        .filter_map(|bucket| Some((window_span(&bucket.window)?, quotas.get(&bucket.id).filter(|q| !q.disabled))))
+        .collect()
+}
+
+fn family_windows<'a>(quotas: &'a BTreeMap<String, payload::Quota>, model: &str) -> Windows<'a> {
     let entries: Vec<(&str, u64, &payload::Quota)> = quotas
         .iter()
         .filter_map(|(key, q)| {
@@ -89,22 +112,37 @@ fn family_windows<'a>(quotas: &'a BTreeMap<String, payload::Quota>, model: &str)
         })
         .collect();
     let model = model.to_ascii_lowercase();
+    let model: Vec<&str> = model.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let fit = |family: &str| {
+        let parts = family.split('-').count();
+        let hits = family.split('-').filter(|part| model.contains(&part.to_ascii_lowercase().as_str())).count();
+        (hits, parts - hits)
+    };
     let families = || entries.iter().map(|(family, ..)| *family);
     let Some(family) = families()
-        .find(|family| model.contains(&family.to_ascii_lowercase()))
-        .or_else(|| families().find(|family| !family.chars().all(|c| c.is_ascii_alphabetic())))
+        .filter(|family| fit(family).0 > 0)
+        .min_by_key(|family| {
+            let (hits, misses) = fit(family);
+            (Reverse(hits), misses)
+        })
+        .or_else(|| families().find(|family| family.chars().any(|c| c.is_ascii_digit())))
         .or_else(|| families().next())
     else {
         return Vec::new();
     };
-    let mut windows: Vec<(u64, &payload::Quota)> =
-        entries.into_iter().filter(|(f, ..)| *f == family).map(|(_, span, q)| (span, q)).collect();
+    let mut windows: Windows<'a> = entries
+        .into_iter()
+        .filter(|(f, ..)| *f == family)
+        .map(|(_, span, q)| (span, (!q.disabled).then_some(q)))
+        .collect();
     windows.sort_by_key(|(span, _)| *span);
     windows
 }
 
 fn pick<'a>(quotas: &'a BTreeMap<String, payload::Quota>, model_id: &str) -> Option<&'a payload::Quota> {
-    let known = || quotas.iter().filter_map(|(key, q)| Some((key.as_str(), q, q.remaining_fraction?)));
+    let known = || {
+        quotas.iter().filter(|(_, q)| !q.disabled).filter_map(|(key, q)| Some((key.as_str(), q, q.remaining_fraction?)))
+    };
     let matches = |key: &str| !model_id.is_empty() && (key.contains(model_id) || model_id.contains(key));
     known().find(|(key, ..)| matches(key)).or_else(|| known().min_by(|a, b| a.2.total_cmp(&b.2))).map(|(_, q, _)| q)
 }
@@ -149,7 +187,7 @@ mod tests {
     fn lines(json: &str, tight: bool) -> Vec<String> {
         let frame = Frame { now: NOW, bar_width: 0, tight };
         let mut session = Session::detached(NOW);
-        read(&parse(json), NOW, &mut session).iter().map(|q| strip(&q.render(&frame))).collect()
+        read(&parse(json), NOW, &mut session, None).iter().map(|q| strip(&q.render(&frame))).collect()
     }
 
     #[test]
@@ -229,6 +267,81 @@ mod tests {
     fn agy_third_party_models_use_the_non_product_family() {
         let json = format!(r#"{{"product":"antigravity","model":{{"display_name":"Claude Sonnet 4.6"}},{AGY_QUOTA}}}"#);
         assert_eq!(lines(&json, false), ["sessão 0% ↻ 5h00m", "semana 100% ⇥ 2m"]);
+    }
+
+    const AGY_ARGON_QUOTA: &str = r#""quota":{"3p-weekly":{"remaining_fraction":0.5,"reset_in_seconds":7200},
+        "gemini-5h":{"remaining_fraction":0.9,"reset_in_seconds":3600},
+        "gemini-argon-wtu-weekly":{"remaining_fraction":0.2,"reset_in_seconds":7200},
+        "gemini-weekly":{"remaining_fraction":0.7,"reset_in_seconds":7200}}"#;
+
+    #[test]
+    fn agy_switching_models_follows_the_most_specific_family() {
+        let model = |name: &str| {
+            format!(r#"{{"product":"antigravity","model":{{"display_name":"{name}"}},{AGY_ARGON_QUOTA}}}"#)
+        };
+        assert_eq!(lines(&model("Gemini 4 Argon (Medium)"), false), ["sessão –", "semana 80%"]);
+        assert_eq!(lines(&model("Gemini 3.8 Flash (High)"), false), ["sessão 10% ↻ 1h00m", "semana 30%"]);
+        assert_eq!(lines(&model("Claude Opus 5.5"), false), ["sessão –", "semana 50%"]);
+    }
+
+    #[test]
+    fn agy_shows_a_disabled_bucket_of_the_model_as_unavailable() {
+        let json = r#"{"product":"antigravity","model":{"display_name":"Gemini 4 Argon"},
+            "quota":{"gemini-argon-weekly":{"remaining_fraction":0,"disabled":true},
+                     "gemini-weekly":{"remaining_fraction":0.6,"reset_in_seconds":60}}}"#;
+        assert_eq!(lines(json, false), ["sessão –", "semana –"]);
+    }
+
+    #[test]
+    fn a_window_past_its_reset_shows_no_usage() {
+        let json = r#"{"rate_limits":{"five_hour":{"used_percentage":72,"resets_at":500},
+                       "seven_day":{"used_percentage":31,"resets_at":9000}}}"#;
+        assert_eq!(lines(json, false), ["sessão 0%", "semana 31%"]);
+    }
+
+    #[test]
+    fn agy_follows_the_official_groups_and_keeps_both_slots() {
+        let groups = Groups {
+            fetched_at: 0,
+            groups: vec![
+                Group {
+                    name: "Gemini Models".into(),
+                    models: vec!["Gemini Flash".into(), "Gemini Pro".into()],
+                    buckets: vec![bucket("gemini-weekly", "weekly"), bucket("gemini-5h", "5h")],
+                },
+                Group {
+                    name: "Claude and GPT models".into(),
+                    models: vec!["Claude Opus".into(), "GPT-OSS".into()],
+                    buckets: vec![bucket("3p-weekly", "weekly"), bucket("3p-5h", "5h")],
+                },
+                Group {
+                    name: "Gemini 4 Argon".into(),
+                    models: vec![],
+                    buckets: vec![bucket("gemini-argon-wtu-weekly", "weekly")],
+                },
+            ],
+        };
+        let quota = r#""quota":{"3p-weekly":{"remaining_fraction":0,"reset_in_seconds":7200},
+            "3p-5h":{"remaining_fraction":1,"disabled":true},
+            "gemini-5h":{"remaining_fraction":0.9,"reset_in_seconds":3600},
+            "gemini-argon-wtu-weekly":{"remaining_fraction":0.01,"reset_in_seconds":7200},
+            "gemini-weekly":{"remaining_fraction":0.04,"reset_in_seconds":7200}}"#;
+        let frame = Frame { now: NOW, bar_width: 0, tight: true };
+        let line = |model: &str| {
+            let json = format!(r#"{{"product":"antigravity","model":{{"display_name":"{model}"}},{quota}}}"#);
+            let mut session = Session::detached(NOW);
+            read(&parse(&json), NOW, &mut session, Some(&groups))
+                .iter()
+                .map(|q| strip(&q.render(&frame)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(line("Gemini 3.8 Flash (High)"), ["sessão 10%", "semana 96%"]);
+        assert_eq!(line("Gemini 4 Argon (Medium)"), ["sessão –", "semana 99%"]);
+        assert_eq!(line("GPT-OSS 120B (Medium)"), ["sessão –", "semana 100%"]);
+    }
+
+    fn bucket(id: &str, window: &str) -> crate::agy::Bucket {
+        crate::agy::Bucket { id: id.into(), window: window.into() }
     }
 
     #[test]

@@ -60,6 +60,8 @@ pub struct Quota {
     pub remaining_fraction: Option<f64>,
     pub reset_time: Option<String>,
     pub reset_in_seconds: Option<f64>,
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 impl Quota {

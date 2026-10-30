@@ -98,7 +98,7 @@ fn agy_line_uses_quota_mode_and_terminal_width() {
     assert!(out.text.contains(" 25% ↻"), "{:?}", out.text);
     assert!(out.text.contains("contexto ━━━━──────"), "{:?}", out.text);
     assert_clock(&out.text, "00:00");
-    assert_eq!(temp.cache_files(), ["status_cli-agy-conv-1", "usage-agy.json"]);
+    assert_eq!(temp.cache_files(), ["agy-quota-groups.lock", "status_cli-agy-conv-1", "usage-agy.json"]);
 }
 
 #[test]

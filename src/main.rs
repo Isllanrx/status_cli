@@ -1,3 +1,4 @@
+mod agy;
 mod claude;
 mod codex;
 mod i18n;
@@ -43,6 +44,13 @@ fn main() {
             std::process::exit(if healthy { 0 } else { 1 });
         }
         Some("update") => match update::run() {
+            Ok(message) => return println!("{message}"),
+            Err(err) => {
+                eprintln!("status_cli: {err}");
+                std::process::exit(1);
+            }
+        },
+        Some("agy-groups") => match agy::refresh(&cache_dir(), now_millis()) {
             Ok(message) => return println!("{message}"),
             Err(err) => {
                 eprintln!("status_cli: {err}");
@@ -224,7 +232,7 @@ fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
     let payload = &usage::share(&cache_dir(), payload, now);
     Line {
         model: model::read(payload),
-        quotas: quota::read(payload, now, session),
+        quotas: quota::read(payload, now, session, agy_groups(payload, now).as_ref()),
         context: context::read(
             payload,
             if payload.host() == Host::Claude { claude::auto_compact(payload) } else { claude::AutoCompact::default() },
@@ -236,6 +244,14 @@ fn line(payload: &Payload, now: u64, session: &mut Session) -> Line {
             .or(env_number("COLUMNS").map(|c| (c as usize).min(payload::MAX_COLUMNS)))
             .filter(|&c| c > 0),
     }
+}
+
+fn agy_groups(payload: &Payload, now: u64) -> Option<agy::Groups> {
+    if payload.host() != Host::Agy {
+        return None;
+    }
+    let buckets = payload.quota.iter().flat_map(|quota| quota.keys().map(String::as_str));
+    agy::load(&cache_dir(), buckets, now)
 }
 
 fn cache_dir() -> PathBuf {
