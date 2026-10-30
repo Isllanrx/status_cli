@@ -7,9 +7,9 @@ use serde_json::{Map, Value, json};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 use crate::install::hooks::{self, Event};
+use crate::install::shim;
 
-pub const CODEX_ALIAS: &str = "codex-stt";
-const CODEX_STATUS_ITEMS: [&str; 4] = ["model-with-reasoning", "five-hour-limit", "weekly-limit", "context-used"];
+const OLD_CODEX_ALIAS: &str = "codex-stt";
 
 enum Config {
     Json { status_line: Option<Value>, guard: Option<(&'static [Event], &'static str)> },
@@ -49,38 +49,30 @@ pub fn run() -> Vec<Result<String, String>> {
             }
         })
         .collect();
-    outcomes.push(Ok(link_codex_alias()));
+    match env::current_exe() {
+        Ok(exe) => {
+            outcomes.extend(remove_old_alias(&exe).map(Ok));
+            if cfg!(windows) {
+                outcomes.push(shim::install(&exe));
+            }
+        }
+        Err(err) => outcomes.push(Err(format!("codex: not intercepted ({err})"))),
+    }
     outcomes
 }
 
-fn link_codex_alias() -> String {
-    let linked = env::current_exe().and_then(|exe| {
-        let alias = exe.with_file_name(format!("{CODEX_ALIAS}{}", env::consts::EXE_SUFFIX));
-        if alias == exe {
-            return Ok(alias);
-        }
-        if fs::symlink_metadata(&alias).is_ok() && fs::remove_file(&alias).is_err() {
-            let stale = with_suffix(&alias, ".old");
-            let _ = fs::remove_file(&stale);
-            fs::rename(&alias, &stale)?;
-        }
-        link(&exe, &alias)?;
-        Ok(alias)
+fn remove_old_alias(exe: &Path) -> Option<String> {
+    let alias = exe.with_file_name(format!("{OLD_CODEX_ALIAS}{}", env::consts::EXE_SUFFIX));
+    fs::symlink_metadata(&alias).ok()?;
+    let removed = fs::remove_file(&alias).or_else(|_| {
+        let stale = with_suffix(&alias, ".old");
+        let _ = fs::remove_file(&stale);
+        fs::rename(&alias, &stale)
     });
-    match linked {
-        Ok(alias) => format!("{CODEX_ALIAS}: ready -> {}", alias.display()),
-        Err(err) => format!("{CODEX_ALIAS}: not created ({err}); use `status_cli codex` instead"),
-    }
-}
-
-#[cfg(unix)]
-fn link(exe: &Path, alias: &Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(exe, alias)
-}
-
-#[cfg(windows)]
-fn link(exe: &Path, alias: &Path) -> std::io::Result<()> {
-    fs::hard_link(exe, alias).or_else(|_| fs::copy(exe, alias).map(drop))
+    Some(match removed {
+        Ok(()) => format!("{OLD_CODEX_ALIAS}: removed, use `codex` -> {}", alias.display()),
+        Err(err) => format!("{OLD_CODEX_ALIAS}: could not remove ({err}) -> {}", alias.display()),
+    })
 }
 
 pub fn doctor() -> (Vec<String>, bool) {
@@ -113,7 +105,7 @@ pub fn doctor() -> (Vec<String>, bool) {
             Config::Json { status_line, guard } => {
                 (status_line.is_none() || text.contains("status_cli")) && (guard.is_none() || hooks::is_guard(&text))
             }
-            Config::CodexToml => text.contains("status_line"),
+            Config::CodexToml => native_line_off(&text),
             Config::AgyPlugin => hooks::is_guard(&text),
         });
         lines.push(match (installed, ready) {
@@ -134,12 +126,9 @@ pub fn doctor() -> (Vec<String>, bool) {
             "missing no host is configured; install Claude Code, agy or Codex and run status_cli setup".to_owned(),
         );
     }
-    let alias = exe.map(|exe| exe.with_file_name(format!("{CODEX_ALIAS}{}", env::consts::EXE_SUFFIX)));
-    lines.push(if alias.as_deref().is_some_and(Path::exists) {
-        format!("ok      {CODEX_ALIAS} shortcut is installed")
-    } else {
-        format!("info    {CODEX_ALIAS} shortcut is missing; run status_cli setup")
-    });
+    if cfg!(windows) {
+        lines.push(shim::doctor());
+    }
     let caps = crate::render::terminal::caps();
     lines.push(format!(
         "info    terminal: {:?} colors, {} glyphs, language {}",
@@ -279,9 +268,14 @@ fn merge_codex(existing: &str) -> Result<String, Box<dyn Error>> {
     let mut document: DocumentMut = existing.parse()?;
     let tui = document.entry("tui").or_insert(Item::Table(Table::new()));
     let tui = tui.as_table_like_mut().ok_or("[tui] in config.toml is not a table")?;
-    tui.insert("status_line", value(CODEX_STATUS_ITEMS.into_iter().collect::<Array>()));
-    tui.insert("status_line_use_colors", value(true));
+    tui.insert("status_line", value(Array::new()));
     Ok(document.to_string())
+}
+
+fn native_line_off(text: &str) -> bool {
+    text.parse::<DocumentMut>().ok().is_some_and(|document| {
+        document.get("tui").and_then(|tui| tui.get("status_line")).and_then(Item::as_array).is_some_and(Array::is_empty)
+    })
 }
 
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -308,14 +302,18 @@ mod tests {
         let after = merge_codex(before).unwrap();
         assert!(after.starts_with("# mine\nmodel = \"gpt\"\n"));
         assert!(after.contains("screen_reader_detection_done = true"));
-        assert!(
-            after.contains(
-                r#"status_line = ["model-with-reasoning", "five-hour-limit", "weekly-limit", "context-used"]"#
-            )
-        );
-        assert!(after.contains("status_line_use_colors = true"));
+        assert!(after.contains("status_line = []"));
         assert!(after.contains("[tui.model_availability_nux]"));
         assert!(merge_codex(&after).unwrap() == after);
+        assert!(native_line_off(&after));
+    }
+
+    #[test]
+    fn codex_native_line_counts_as_on_until_it_is_emptied() {
+        assert!(!native_line_off(""));
+        assert!(!native_line_off("[tui]\nstatus_line = [\"context-used\"]\n"));
+        let replaced = merge_codex("[tui]\nstatus_line = [\"model-with-reasoning\", \"weekly-limit\"]\n").unwrap();
+        assert!(native_line_off(&replaced));
     }
 
     #[test]

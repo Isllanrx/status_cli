@@ -10,7 +10,8 @@ mod usage;
 use std::env;
 use std::error::Error;
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -31,8 +32,8 @@ fn main() {
     let invoked_as = env::args_os()
         .next()
         .and_then(|arg| PathBuf::from(arg).file_stem().map(|stem| stem.to_string_lossy().to_ascii_lowercase()));
-    if invoked_as.as_deref() == Some(setup::CODEX_ALIAS) {
-        return run_codex(env::args().skip(1).collect());
+    if invoked_as.as_deref() == Some("codex") {
+        return run_shim(env::args().skip(1).collect());
     }
     match env::args().nth(1).as_deref() {
         Some("setup") => return run_setup(),
@@ -48,7 +49,9 @@ fn main() {
                 std::process::exit(1);
             }
         },
-        Some("codex") => return run_codex(env::args().skip(2).collect()),
+        Some("codex") => {
+            return run_codex(env::args().skip(2).collect(), env::var_os(codex::SHIM_VAR).map(PathBuf::from));
+        }
         Some("guard") => {
             let Some(host) = env::args().nth(2).as_deref().and_then(guard::host) else {
                 eprintln!("status_cli: usage: status_cli guard <claude|codex|agy>");
@@ -104,10 +107,42 @@ fn main() {
     }
 }
 
-fn run_codex(args: Vec<String>) {
+fn run_shim(args: Vec<String>) {
+    let shim = env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
+    if env::var_os(codex::GUARD_VAR).is_some() || env::var_os(codex::SHIM_VAR).is_some() {
+        let launch = codex::command(&args, shim.as_deref());
+        let status = Command::new(&launch.program).args(&launch.args).envs(launch.env.iter().cloned()).status();
+        exit_with(status, &launch.program);
+    }
+    if let Some(dir) = &shim
+        && let Some(exe) = codex::installed_status_cli(dir)
+    {
+        if let Ok(status) = Command::new(&exe).arg("codex").args(&args).env(codex::SHIM_VAR, dir).status() {
+            std::process::exit(status.code().unwrap_or(1));
+        }
+    }
+    run_codex(args, shim)
+}
+
+fn exit_with(status: io::Result<ExitStatus>, program: &str) -> ! {
+    match status {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(err) => {
+            eprintln!("status_cli: could not start {program}: {err}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_codex(args: Vec<String>, shim: Option<PathBuf>) {
     let flag = |name: &str| args.iter().any(|arg| arg == name);
     let (watch, once) = (flag("--watch"), flag("--once"));
     let launching = !watch && !once;
+    let launch = codex::command(&args, shim.as_deref());
+    if launching && !codex::interactive(&args) {
+        let status = Command::new(&launch.program).args(&launch.args).envs(launch.env.iter().cloned()).status();
+        exit_with(status, &launch.program);
+    }
     let mut reader = match env::current_dir() {
         Ok(cwd) if launching => codex::Reader::for_launch(now_millis(), cwd),
         _ => codex::Reader::latest(),
@@ -146,11 +181,10 @@ fn run_codex(args: Vec<String>) {
             thread::sleep(Duration::from_millis(1000 - now_millis() % 1000));
         }
     }
-    let (program, program_args) = codex::command(&args);
-    match wrap::run(&program, &program_args, |columns| render(Some(columns))) {
+    match wrap::run(&launch, |columns| render(Some(columns))) {
         Ok(code) => std::process::exit(code),
         Err(err) => {
-            eprintln!("status_cli: could not start {program}: {err}");
+            eprintln!("status_cli: could not start {}: {err}", launch.program);
             std::process::exit(1);
         }
     }

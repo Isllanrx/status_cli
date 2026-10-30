@@ -1,6 +1,9 @@
+mod launch;
 mod turn;
 mod window;
 pub mod wrap;
+
+pub use launch::{GUARD_VAR, SHIM_VAR, command, installed_status_cli, interactive};
 
 use std::env;
 use std::error::Error;
@@ -181,19 +184,6 @@ fn context(used: Option<f64>, size: Option<f64>) -> ContextWindow {
         (effective > 0.0).then(|| (1.0 - remaining.clamp(0.0, 1.0)) * 100.0)
     });
     ContextWindow { used_percentage, context_window_size: size }
-}
-
-pub fn command(args: &[String]) -> (String, Vec<String>) {
-    if let Ok(program) = env::var("STATUS_CLI_CODEX") {
-        return (program, args.to_vec());
-    }
-    if cfg!(windows) {
-        let mut wrapped = vec!["/d".to_owned(), "/c".to_owned(), "codex".to_owned()];
-        wrapped.extend_from_slice(args);
-        ("cmd".to_owned(), wrapped)
-    } else {
-        ("codex".to_owned(), args.to_vec())
-    }
 }
 
 fn codex_home() -> Option<PathBuf> {

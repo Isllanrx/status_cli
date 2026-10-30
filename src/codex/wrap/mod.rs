@@ -16,6 +16,8 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 use stream::Stream;
 
+use super::launch::Launch;
+
 const TICK: Duration = Duration::from_millis(250);
 const QUIET: Duration = Duration::from_millis(30);
 const DRAIN: Duration = Duration::from_millis(60);
@@ -26,20 +28,33 @@ enum Event {
     Exit(u32),
 }
 
-pub fn run(program: &str, args: &[String], mut status: impl FnMut(usize) -> String) -> Result<i32, Box<dyn Error>> {
+pub fn run(launch: &Launch, mut status: impl FnMut(usize) -> String) -> Result<i32, Box<dyn Error>> {
+    let Launch { program, args, env } = launch;
+    let direct = || -> Result<i32, Box<dyn Error>> {
+        Ok(Command::new(program).args(args).envs(env.iter().cloned()).status()?.code().unwrap_or(1))
+    };
     let size = terminal::size().ok().filter(|(_, rows)| *rows >= 3);
     let Some((cols, rows)) = size.filter(|_| io::stdin().is_terminal() && io::stdout().is_terminal()) else {
-        return Ok(Command::new(program).args(args).status()?.code().unwrap_or(1));
+        return direct();
     };
 
-    let pair = native_pty_system().openpty(pty_size(cols, rows))?;
+    let Ok(pair) = native_pty_system().openpty(pty_size(cols, rows)) else { return direct() };
     let mut command = CommandBuilder::new(program);
     command.args(args);
+    for (key, value) in env {
+        command.env(key, value);
+    }
     command.cwd(std::env::current_dir()?);
-    let mut child = pair.slave.spawn_command(command)?;
+    let Ok(console) = console::Mode::enter() else { return direct() };
+    let mut child = match pair.slave.spawn_command(command) {
+        Ok(child) => child,
+        Err(_) => {
+            drop(console);
+            return direct();
+        }
+    };
     drop(pair.slave);
 
-    let console = console::Mode::enter()?;
     let mut stream = Stream::new(cols, rows);
     let mut stdout = io::stdout().lock();
     stdout.write_all(&stream.reserve())?;
