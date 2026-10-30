@@ -2,11 +2,14 @@
   <img src="assets/icon.png" alt="status_cli icon" width="160">
 </p>
 
-# status_cli
+<h1 align="center">status_cli</h1>
 
-[![CI](https://github.com/Isllanrx/status_cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Isllanrx/status_cli/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Isllanrx/status_cli)](https://github.com/Isllanrx/status_cli/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/Isllanrx/status_cli/actions/workflows/ci.yml"><img src="https://github.com/Isllanrx/status_cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Isllanrx/status_cli/releases/latest"><img src="https://img.shields.io/github/v/release/Isllanrx/status_cli" alt="Release"></a>
+  <a href="https://github.com/Isllanrx/status_cli/releases"><img src="https://img.shields.io/github/downloads/Isllanrx/status_cli/total" alt="Downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
 
 Status line for [Claude Code](https://code.claude.com/docs/en/statusline), the
 [Antigravity CLI](https://www.antigravity.google/docs/cli/statusline) (`agy`) and the
