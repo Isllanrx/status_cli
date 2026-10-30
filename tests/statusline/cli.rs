@@ -39,11 +39,15 @@ fn every_terminal_shows_the_latest_shared_usage() {
             resets + 86_400
         )
     };
+    run(&temp, &payload("idle", 10), Some(160));
+    run(&temp, &payload("busy", 10), Some(160));
     run(&temp, &payload("busy", 15), Some(160));
-    let idle = run(&temp, &payload("idle", 10), Some(160)).text;
-    assert!(idle.contains(" 15% ↻ ") && !idle.contains(" 10%"), "{idle:?}");
+    run(&temp, &payload("idle", 10), Some(160));
     let new = run(&temp, r#"{"session_id":"new"}"#, Some(160)).text;
-    assert!(new.contains(" 15% ↻ "), "{new:?}");
+    assert!(new.contains(" 15% ↻ ") && !new.contains(" 10%"), "{new:?}");
+    run(&temp, &payload("busy", 12), Some(160));
+    let later = run(&temp, r#"{"session_id":"later"}"#, Some(160)).text;
+    assert!(later.contains(" 12% ↻ "), "{later:?}");
 }
 
 #[test]
