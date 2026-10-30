@@ -128,11 +128,11 @@ jobs:
           for sh in sh dash bash zsh ksh tcsh fish; do
             command -v "$sh" >/dev/null || { echo "skip $sh"; continue; }
             out=$(NO_COLOR=1 COLUMNS=150 "$sh" -c 'status_cli < payload.json')
-            case "$out" in *"Opus - High"*sessão*tempo*) echo "ok $sh" ;; *) echo "FAIL $sh: $out"; failed=1 ;; esac
+            case "$out" in *"Opus 5.5 - High"*sessão*tempo*) echo "ok $sh" ;; *) echo "FAIL $sh: $out"; failed=1 ;; esac
           done
           if command -v nu >/dev/null; then
             out=$(NO_COLOR=1 nu -c 'open --raw payload.json | status_cli')
-            case "$out" in *"Opus - High"*) echo "ok nu" ;; *) echo "FAIL nu: $out"; failed=1 ;; esac
+            case "$out" in *"Opus 5.5 - High"*) echo "ok nu" ;; *) echo "FAIL nu: $out"; failed=1 ;; esac
           fi
           exit $failed
 
@@ -166,7 +166,7 @@ jobs:
           $failed = $false
           foreach ($name in $runs.Keys) {
             $out = (& $runs[$name]) -join ''
-            if ($out -match 'Opus - High' -and $out -match 'tempo') { "ok $name" } else { "FAIL ${name}: $out"; $failed = $true }
+            if ($out -match 'Opus 5.5 - High' -and $out -match 'tempo') { "ok $name" } else { "FAIL ${name}: $out"; $failed = $true }
           }
           if ($failed) { exit 1 }
 
@@ -197,7 +197,7 @@ jobs:
           printf '{"session_id":"ci","model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"cost":{"total_duration_ms":60000}}' > bin/payload.json
           out=$(docker run --rm -e COLUMNS=150 -e NO_COLOR=1 -e STATUS_CLI_LANG=pt -v "$PWD/bin:/v:ro" "${{ matrix.image }}" sh -c '/v/status_cli < /v/payload.json')
           echo "$out"
-          case "$out" in *"Opus - High"*tempo*) ;; *) exit 1 ;; esac
+          case "$out" in *"Opus 5.5 - High"*tempo*) ;; *) exit 1 ;; esac
 
   version:
     runs-on: ubuntu-latest
