@@ -20,11 +20,7 @@ pub fn read(payload: &Payload) -> Option<Model> {
 }
 
 fn short_name(display_name: &str) -> Option<String> {
-    let words: Vec<&str> = display_name
-        .split_whitespace()
-        .take_while(|word| !word.starts_with('('))
-        .filter(|word| !word.starts_with(|c: char| c.is_ascii_digit()))
-        .collect();
+    let words: Vec<&str> = display_name.split_whitespace().take_while(|word| !word.starts_with('(')).collect();
     (!words.is_empty()).then(|| words.join(" "))
 }
 
@@ -56,44 +52,45 @@ mod tests {
     #[test]
     fn claude_shows_first_word_and_effort() {
         let json = r#"{"model":{"display_name":"Opus 5.5"},"effort":{"level":"xhigh"}}"#;
-        assert_eq!(line(json).as_deref(), Some("Opus - Xhigh"));
+        assert_eq!(line(json).as_deref(), Some("Opus 5.5 - Xhigh"));
     }
 
     #[test]
     fn agy_uses_execution_mode() {
         let json = r#"{"product":"antigravity","model":{"display_name":"Gemini 3"},"execution_mode":"planning"}"#;
-        assert_eq!(line(json).as_deref(), Some("Gemini - Planning"));
+        assert_eq!(line(json).as_deref(), Some("Gemini 3 - Planning"));
     }
 
     #[test]
     fn fast_mode_adds_a_badge() {
         let json = r#"{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"fast_mode":true}"#;
-        assert_eq!(line(json).as_deref(), Some("Opus - High · fast"));
+        assert_eq!(line(json).as_deref(), Some("Opus 5.5 - High · fast"));
     }
 
     #[test]
-    fn short_name_keeps_the_family_without_versions() {
+    fn short_name_keeps_the_version_and_drops_the_suffix() {
         for (display, short) in [
-            ("Opus 5.5", "Opus"),
-            ("Opus 4.6 (1M context)", "Opus"),
-            ("Sonnet 5.5", "Sonnet"),
-            ("Haiku 5.5", "Haiku"),
-            ("Fable 5.1", "Fable"),
-            ("Claude Sonnet 4.5", "Claude Sonnet"),
+            ("Opus 5.5", "Opus 5.5"),
+            ("Opus 4.6 (1M context)", "Opus 4.6"),
+            ("Sonnet 5.5", "Sonnet 5.5"),
+            ("Haiku 5.5", "Haiku 5.5"),
+            ("Fable 5.1", "Fable 5.1"),
+            ("Claude Sonnet 4.5", "Claude Sonnet 4.5"),
             ("Claude", "Claude"),
-            ("Gemini 3 Pro", "Gemini Pro"),
-            ("Gemini 3 Flash", "Gemini Flash"),
-            ("GPT-OSS 120B", "GPT-OSS"),
+            ("Gemini 3 Pro", "Gemini 3 Pro"),
+            ("Gemini 3 Flash", "Gemini 3 Flash"),
+            ("GPT-OSS 120B", "GPT-OSS 120B"),
         ] {
             assert_eq!(short_name(display).as_deref(), Some(short), "{display}");
         }
-        assert_eq!(short_name("4.5"), None);
+        assert_eq!(short_name("4.5").as_deref(), Some("4.5"));
+        assert_eq!(short_name("(1M context)"), None);
     }
 
     #[test]
     fn agy_reads_effort_from_the_model() {
         let json = r#"{"product":"antigravity","model":{"display_name":"Gemini 3.8 Flash (High)","effort":"high"}}"#;
-        assert_eq!(line(json).as_deref(), Some("Gemini Flash - High"));
+        assert_eq!(line(json).as_deref(), Some("Gemini 3.8 Flash - High"));
     }
 
     #[test]

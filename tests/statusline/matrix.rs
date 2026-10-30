@@ -4,11 +4,11 @@ use crate::common::*;
 fn every_claude_model_effort_and_mode_fits_and_reads_right() {
     let temp = TempDir::new();
     let models = [
-        ("Opus 5.5", "Opus"),
-        ("Sonnet 5.5", "Sonnet"),
-        ("Haiku 5.5", "Haiku"),
-        ("Fable 5.1", "Fable"),
-        ("Opus 4.6 (1M context)", "Opus"),
+        ("Opus 5.5", "Opus 5.5"),
+        ("Sonnet 5.5", "Sonnet 5.5"),
+        ("Haiku 5.5", "Haiku 5.5"),
+        ("Fable 5.1", "Fable 5.1"),
+        ("Opus 4.6 (1M context)", "Opus 4.6"),
     ];
     let efforts = [
         (None, ""),
@@ -43,10 +43,10 @@ fn every_claude_model_effort_and_mode_fits_and_reads_right() {
 fn every_agy_model_and_mode_fits_and_reads_right() {
     let temp = TempDir::new();
     let models = [
-        ("Gemini 3 Pro", "Gemini Pro"),
-        ("Gemini 3 Flash", "Gemini Flash"),
-        ("Claude Sonnet 4.5", "Claude Sonnet"),
-        ("GPT-OSS 120B", "GPT-OSS"),
+        ("Gemini 3 Pro", "Gemini 3 Pro"),
+        ("Gemini 3 Flash", "Gemini 3 Flash"),
+        ("Claude Sonnet 4.5", "Claude Sonnet 4.5"),
+        ("GPT-OSS 120B", "GPT-OSS 120B"),
     ];
     let modes = [(None, ""), (Some("planning"), " - Planning"), (Some("fast"), " - Fast")];
     for (display, short) in models {

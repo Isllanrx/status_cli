@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 fn claude_line_shows_every_segment() {
     let temp = TempDir::new();
     let out = run(&temp, &claude("a", 3_900_000), Some(160));
-    assert!(out.text.starts_with("Opus - High ╱ sessão "), "{:?}", out.text);
+    assert!(out.text.starts_with("Opus 5.5 - High ╱ sessão "), "{:?}", out.text);
     assert!(out.text.contains("72% ↻ 1h29m") || out.text.contains("72% ↻ 1h30m"), "{:?}", out.text);
     assert!(out.text.contains(" 31% ╱ compactar "), "{:?}", out.text);
     assert!(out.text.contains(" 57% ╱ tempo "), "{:?}", out.text);
@@ -17,7 +17,7 @@ fn claude_line_shows_every_segment() {
 fn missing_rate_limits_render_placeholders() {
     let temp = TempDir::new();
     let out = run(&temp, r#"{"model":{"display_name":"Opus 5.5"}}"#, Some(160));
-    assert!(out.text.starts_with(&format!("Opus ╱ sessão {} –", "─".repeat(10))), "{:?}", out.text);
+    assert!(out.text.starts_with(&format!("Opus 5.5 ╱ sessão {} –", "─".repeat(10))), "{:?}", out.text);
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn agy_line_uses_quota_mode_and_terminal_width() {
         "context_window":{"used_percentage":40,"context_window_size":1000000},"terminal_width":150}"#;
     let out = run(&temp, input, None);
     assert_eq!(out.width, 142);
-    assert!(out.text.starts_with("Gemini Pro - Planning ╱ cota "), "{:?}", out.text);
+    assert!(out.text.starts_with("Gemini 3 Pro - Planning ╱ cota "), "{:?}", out.text);
     assert!(out.text.contains(" 25% ↻"), "{:?}", out.text);
     assert!(out.text.contains("contexto ━━━━──────"), "{:?}", out.text);
     assert_clock(&out.text, "00:00");
@@ -149,7 +149,7 @@ fn state_lives_in_a_dedicated_directory_created_on_demand() {
 fn utf8_bom_from_windows_powershell_is_accepted() {
     let temp = TempDir::new();
     let out = run(&temp, "\u{feff}{\"model\":{\"display_name\":\"Opus 5.5\"}}\r\n", None);
-    assert!(out.text.starts_with("Opus ╱ "), "{:?}", out.text);
+    assert!(out.text.starts_with("Opus 5.5 ╱ "), "{:?}", out.text);
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn ascii_and_no_color_degrade_cleanly() {
     let temp = TempDir::new();
     let out = run_with(&temp, &claude("a", 0), Some(160), &[("STATUS_CLI_ASCII", "1"), ("NO_COLOR", "1")]);
     assert!(!out.raw.contains('\x1b'));
-    assert!(out.visible.trim_start().starts_with("Opus - High / sessão ="), "{:?}", out.visible);
+    assert!(out.visible.trim_start().starts_with("Opus 5.5 - High / sessão ="), "{:?}", out.visible);
 }
 
 #[test]

@@ -60,7 +60,7 @@ fn setup_then_each_host_runs_the_configured_command_through_its_shell() {
         r#"{"session_id":"e2e","model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"cost":{"total_duration_ms":61000}}"#,
         &temp.0,
     );
-    assert!(claude_line.trim_start().starts_with("Opus - High ╱ sessão"), "{claude_line:?}");
+    assert!(claude_line.trim_start().starts_with("Opus 5.5 - High ╱ sessão"), "{claude_line:?}");
     assert!(claude_line.trim_end().ends_with("00:01:01"), "{claude_line:?}");
 
     let agy_line = host_shell(
@@ -69,7 +69,7 @@ fn setup_then_each_host_runs_the_configured_command_through_its_shell() {
             "quota":{"gemini-5h":{"remaining_fraction":0.5,"reset_in_seconds":600}},"terminal_width":120}"#,
         &temp.0,
     );
-    assert!(agy_line.trim_start().starts_with("Gemini Flash - High ╱ sessão"), "{agy_line:?}");
+    assert!(agy_line.trim_start().starts_with("Gemini 3.8 Flash - High ╱ sessão"), "{agy_line:?}");
 
     let mut doctor = Command::new(env!("CARGO_BIN_EXE_status_cli"));
     with_home(&mut doctor, &temp.0);
