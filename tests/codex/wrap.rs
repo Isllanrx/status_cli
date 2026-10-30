@@ -7,7 +7,7 @@ use crate::common::*;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 #[test]
-fn wraps_the_child_and_keeps_the_last_row_for_the_status_line() {
+fn wraps_the_child_and_keeps_the_last_two_rows_for_the_status() {
     let temp = TempDir::new();
     let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 100, pixel_width: 0, pixel_height: 0 }).unwrap();
     let mut command = CommandBuilder::new(env!("CARGO_BIN_EXE_status_cli"));
@@ -46,7 +46,8 @@ fn wraps_the_child_and_keeps_the_last_row_for_the_status_line() {
 
     assert_eq!(status.exit_code(), 3);
     assert!(output.contains("READY"), "{output:?}");
-    assert!(cfg!(windows) || output.contains("\x1b[1;23r"), "{output:?}");
-    assert!(output.contains("\x1b[24;1H"), "{output:?}");
-    assert!(output.contains("sessão") && output.contains("tempo"), "{output:?}");
+    assert!(cfg!(windows) || output.contains("\x1b[1;22r"), "{output:?}");
+    assert!(["\x1b[23;1H", "\x1b[24;1H"].iter().all(|row| output.contains(row)), "{output:?}");
+    assert!(output.contains("By Isllan T."), "{output:?}");
+    assert!(output.contains("Sessão") && output.contains("Tempo"), "{output:?}");
 }

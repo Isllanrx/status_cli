@@ -14,10 +14,11 @@ use std::time::{Duration, Instant};
 use crossterm::terminal;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
-use stream::Stream;
+use stream::{STATUS_ROWS, Stream};
 
 use super::launch::Launch;
 
+const MIN_ROWS: u16 = STATUS_ROWS + 2;
 const TICK: Duration = Duration::from_millis(250);
 const QUIET: Duration = Duration::from_millis(30);
 const DRAIN: Duration = Duration::from_millis(60);
@@ -33,7 +34,7 @@ pub fn run(launch: &Launch, mut status: impl FnMut(usize) -> String) -> Result<i
     let direct = || -> Result<i32, Box<dyn Error>> {
         Ok(Command::new(program).args(args).envs(env.iter().cloned()).status()?.code().unwrap_or(1))
     };
-    let size = terminal::size().ok().filter(|(_, rows)| *rows >= 3);
+    let size = terminal::size().ok().filter(|(_, rows)| *rows >= MIN_ROWS);
     let Some((cols, rows)) = size.filter(|_| io::stdin().is_terminal() && io::stdout().is_terminal()) else {
         return direct();
     };
@@ -76,7 +77,7 @@ pub fn run(launch: &Launch, mut status: impl FnMut(usize) -> String) -> Result<i
             }
         }
     });
-    let status_row = Arc::new(AtomicU16::new(rows));
+    let status_row = Arc::new(AtomicU16::new(*stream.status_rows().start()));
     let input_row = Arc::clone(&status_row);
     let mut writer = pair.master.take_writer()?;
     thread::spawn(move || {
@@ -101,7 +102,7 @@ pub fn run(launch: &Launch, mut status: impl FnMut(usize) -> String) -> Result<i
     });
 
     let code = pump(&events, &mut stream, &mut stdout, &mut status, |cols, rows| {
-        status_row.store(rows, Ordering::Relaxed);
+        status_row.store(rows - STATUS_ROWS + 1, Ordering::Relaxed);
         let _ = pair.master.resize(pty_size(cols, rows));
     });
     stdout.write_all(&stream.release())?;
@@ -132,7 +133,7 @@ fn pump(
             }
             Ok(Event::Tick) => {
                 if let Ok((cols, rows)) = terminal::size()
-                    && rows >= 3
+                    && rows >= MIN_ROWS
                     && (cols, rows) != (stream.cols, stream.rows)
                 {
                     let _ = stdout.write_all(&stream.resize(cols, rows));
@@ -156,5 +157,5 @@ fn pump(
 }
 
 fn pty_size(cols: u16, rows: u16) -> PtySize {
-    PtySize { rows: rows - 1, cols, pixel_width: 0, pixel_height: 0 }
+    PtySize { rows: rows - STATUS_ROWS, cols, pixel_width: 0, pixel_height: 0 }
 }

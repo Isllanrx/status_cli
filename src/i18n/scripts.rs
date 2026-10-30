@@ -2,6 +2,7 @@ use super::Labels;
 
 pub const CHINESE: Labels = Labels {
     code: "zh-CN",
+    model: "模型",
     session: "会话",
     week: "本周",
     compact: "压缩",
@@ -9,6 +10,8 @@ pub const CHINESE: Labels = Labels {
     quota: "配额",
     time: "时长",
     resets_in: "距重置",
+    age: "{}未变化",
+    paused: "暂停",
     limit_near: "用量接近上限：开始耗时工作前，先告知用户这些百分比，保持任务记录最新（已完成和后续步骤），\
                  启动子代理或工作流前先确认。",
     limit_reached: "用量即将耗尽：不要开始新任务。在任务记录中写下已完成内容和后续步骤，\
@@ -17,6 +20,7 @@ pub const CHINESE: Labels = Labels {
 
 pub const JAPANESE: Labels = Labels {
     code: "ja",
+    model: "モデル",
     session: "セッション",
     week: "今週",
     compact: "圧縮",
@@ -24,6 +28,8 @@ pub const JAPANESE: Labels = Labels {
     quota: "割り当て",
     time: "時間",
     resets_in: "リセットまで",
+    age: "{}変化なし",
+    paused: "停止中",
     limit_near: "使用量の上限が近い：長い作業を始める前にユーザーにこの割合を伝え、\
                  タスクのメモ（完了内容と次の手順）を最新に保ち、サブエージェントやワークフローを始める前に確認すること。",
     limit_reached: "使用量の上限にほぼ達した：新しいタスクを始めないこと。完了内容と次の手順をタスクのメモに記録し、\
@@ -32,6 +38,7 @@ pub const JAPANESE: Labels = Labels {
 
 pub const KOREAN: Labels = Labels {
     code: "ko",
+    model: "모델",
     session: "세션",
     week: "주간",
     compact: "압축",
@@ -39,6 +46,8 @@ pub const KOREAN: Labels = Labels {
     quota: "할당량",
     time: "시간",
     resets_in: "초기화까지",
+    age: "{} 동안 변화 없음",
+    paused: "중지됨",
     limit_near: "사용 한도에 가까움: 긴 작업을 시작하기 전에 사용자에게 이 비율을 알리고, 작업 메모(완료 내용과 다음 \
                  단계)를 최신으로 유지하며, 하위 에이전트나 워크플로를 시작하기 전에 확인을 받으세요.",
     limit_reached: "사용 한도가 거의 소진됨: 새 작업을 시작하지 마세요. 완료한 내용과 다음 단계를 작업 메모에 \
@@ -47,6 +56,7 @@ pub const KOREAN: Labels = Labels {
 
 pub const RUSSIAN: Labels = Labels {
     code: "ru",
+    model: "модель",
     session: "сессия",
     week: "неделя",
     compact: "сжатие",
@@ -54,6 +64,8 @@ pub const RUSSIAN: Labels = Labels {
     quota: "квота",
     time: "время",
     resets_in: "сброс через",
+    age: "без изменений {}",
+    paused: "приостановлено",
     limit_near: "Лимит использования близок: перед долгой работой сообщи пользователю эти проценты, держи заметки \
                  задачи актуальными (сделано и следующие шаги) и спрашивай подтверждение перед запуском субагентов \
                  или workflow.",
@@ -63,6 +75,7 @@ pub const RUSSIAN: Labels = Labels {
 
 pub const HINDI: Labels = Labels {
     code: "hi",
+    model: "मॉडल",
     session: "सत्र",
     week: "सप्ताह",
     compact: "संक्षेपण",
@@ -70,6 +83,8 @@ pub const HINDI: Labels = Labels {
     quota: "कोटा",
     time: "समय",
     resets_in: "रीसेट में",
+    age: "{} से अपरिवर्तित",
+    paused: "स्थगित",
     limit_near: "उपयोग सीमा निकट है: लंबा काम शुरू करने से पहले उपयोगकर्ता को ये प्रतिशत बताएं, कार्य नोट्स \
                  (पूरा हुआ काम और अगले कदम) अद्यतन रखें और सबएजेंट या वर्कफ़्लो शुरू करने से पहले पुष्टि लें।",
     limit_reached: "उपयोग सीमा लगभग समाप्त: नया काम शुरू न करें। पूरा हुआ काम और अगले कदम कार्य नोट्स में दर्ज करें, \
@@ -78,6 +93,7 @@ pub const HINDI: Labels = Labels {
 
 pub const BENGALI: Labels = Labels {
     code: "bn",
+    model: "মডেল",
     session: "সেশন",
     week: "সপ্তাহ",
     compact: "সংকোচন",
@@ -85,6 +101,8 @@ pub const BENGALI: Labels = Labels {
     quota: "কোটা",
     time: "সময়",
     resets_in: "রিসেট বাকি",
+    age: "{} ধরে অপরিবর্তিত",
+    paused: "স্থগিত",
     limit_near: "ব্যবহারের সীমা কাছাকাছি: দীর্ঘ কাজ শুরু করার আগে ব্যবহারকারীকে এই শতাংশগুলো জানান, কাজের নোট \
                  (সম্পন্ন কাজ ও পরবর্তী ধাপ) হালনাগাদ রাখুন এবং সাবএজেন্ট বা ওয়ার্কফ্লো শুরু করার আগে নিশ্চিত করুন।",
     limit_reached: "ব্যবহারের সীমা প্রায় শেষ: নতুন কাজ শুরু করবেন না। সম্পন্ন কাজ ও পরবর্তী ধাপ কাজের নোটে লিখে রাখুন, \
@@ -93,6 +111,7 @@ pub const BENGALI: Labels = Labels {
 
 pub const THAI: Labels = Labels {
     code: "th",
+    model: "โมเดล",
     session: "เซสชัน",
     week: "สัปดาห์",
     compact: "บีบอัด",
@@ -100,6 +119,8 @@ pub const THAI: Labels = Labels {
     quota: "โควตา",
     time: "เวลา",
     resets_in: "รีเซ็ตใน",
+    age: "ไม่เปลี่ยน {}",
+    paused: "ระงับ",
     limit_near: "ใกล้ถึงขีดจำกัดการใช้งาน: ก่อนเริ่มงานที่ใช้เวลานาน ให้แจ้งเปอร์เซ็นต์เหล่านี้แก่ผู้ใช้ \
                  อัปเดตบันทึกงาน (สิ่งที่ทำแล้วและขั้นตอนถัดไป) และขอยืนยันก่อนเริ่ม subagent หรือ workflow",
     limit_reached: "ขีดจำกัดการใช้งานใกล้หมดแล้ว: อย่าเริ่มงานใหม่ บันทึกสิ่งที่ทำแล้วและขั้นตอนถัดไปในบันทึกงาน \
@@ -108,6 +129,7 @@ pub const THAI: Labels = Labels {
 
 pub const ARABIC: Labels = Labels {
     code: "ar",
+    model: "النموذج",
     session: "الجلسة",
     week: "الأسبوع",
     compact: "الضغط",
@@ -115,6 +137,8 @@ pub const ARABIC: Labels = Labels {
     quota: "الحصة",
     time: "الوقت",
     resets_in: "إعادة الضبط بعد",
+    age: "دون تغيير منذ {}",
+    paused: "معلّق",
     limit_near: "حد الاستخدام قريب: قبل بدء عمل طويل، أخبر المستخدم بهذه النسب، وحدّث ملاحظات المهمة (ما أُنجز \
                  والخطوات التالية)، واطلب التأكيد قبل تشغيل وكلاء فرعيين أو مسارات عمل.",
     limit_reached: "حد الاستخدام يكاد ينفد: لا تبدأ مهام جديدة. سجّل ما أُنجز والخطوات التالية في ملاحظات المهمة، \
@@ -123,6 +147,7 @@ pub const ARABIC: Labels = Labels {
 
 pub const URDU: Labels = Labels {
     code: "ur",
+    model: "ماڈل",
     session: "سیشن",
     week: "ہفتہ",
     compact: "کمپیکٹ",
@@ -130,6 +155,8 @@ pub const URDU: Labels = Labels {
     quota: "کوٹہ",
     time: "وقت",
     resets_in: "ری سیٹ میں",
+    age: "{} سے تبدیل نہیں",
+    paused: "معطل",
     limit_near: "استعمال کی حد قریب ہے: طویل کام شروع کرنے سے پہلے صارف کو یہ فیصد بتائیں، کام کے نوٹس (مکمل کام \
                  اور اگلے مراحل) تازہ رکھیں، اور سب ایجنٹ یا ورک فلو شروع کرنے سے پہلے تصدیق لیں۔",
     limit_reached: "استعمال کی حد تقریباً ختم: نیا کام شروع نہ کریں۔ مکمل کام اور اگلے مراحل کام کے نوٹس میں لکھیں، \

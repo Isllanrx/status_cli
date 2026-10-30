@@ -2,7 +2,7 @@ use crate::common::*;
 use std::fs;
 use std::process::Command;
 
-static SETUP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub static SETUP: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn setup(home: &std::path::Path) -> std::process::Output {
     let _serial = SETUP.lock().unwrap_or_else(|poisoned| poisoned.into_inner());

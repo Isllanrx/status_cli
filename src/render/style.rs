@@ -5,6 +5,7 @@ use crate::render::terminal::{Depth, caps};
 #[derive(Clone, Copy)]
 pub struct Style {
     rgb: Option<[u8; 3]>,
+    bg: Option<[u8; 3]>,
     bold: bool,
     dim: bool,
     underline: bool,
@@ -12,7 +13,7 @@ pub struct Style {
 
 impl Style {
     const fn rgb(rgb: [u8; 3]) -> Self {
-        Self { rgb: Some(rgb), bold: false, dim: false, underline: false }
+        Self { rgb: Some(rgb), bg: None, bold: false, dim: false, underline: false }
     }
 
     pub const fn bold(self) -> Self {
@@ -23,13 +24,17 @@ impl Style {
         Self { dim: true, bold: false, ..self }
     }
 
+    pub const fn on(self, bg: [u8; 3]) -> Self {
+        Self { bg: Some(bg), ..self }
+    }
+
     pub const fn underline(self) -> Self {
         Self { underline: true, ..self }
     }
 
     fn write_sgr(self, out: &mut String, depth: Depth) -> bool {
         let attributes = [(self.bold, "1"), (self.dim, "2"), (self.underline, "4")];
-        if depth == Depth::None || (self.rgb.is_none() && !attributes.iter().any(|(on, _)| *on)) {
+        if depth == Depth::None || (self.rgb.is_none() && self.bg.is_none() && !attributes.iter().any(|(on, _)| *on)) {
             return false;
         }
         out.push_str("\x1b[");
@@ -48,6 +53,16 @@ impl Style {
                 Depth::TrueColor => write!(out, "38;2;{r};{g};{b}"),
                 Depth::Ansi256 => write!(out, "38;5;{}", ansi256(rgb)),
                 _ => write!(out, "{}", ansi16(rgb)),
+            };
+            separator = ";";
+        }
+        if let Some(rgb) = self.bg {
+            out.push_str(separator);
+            let [r, g, b] = rgb;
+            let _ = match depth {
+                Depth::TrueColor => write!(out, "48;2;{r};{g};{b}"),
+                Depth::Ansi256 => write!(out, "48;5;{}", ansi256(rgb)),
+                _ => write!(out, "{}", ansi16(rgb) + 10),
             };
         }
         out.push('m');
@@ -68,13 +83,39 @@ impl Style {
 pub const LABEL: Style = Style::rgb([124, 130, 156]);
 pub const TRACK: Style = Style::rgb([60, 64, 82]);
 pub const SOFT: Style = Style::rgb([92, 97, 120]);
-pub const STRONG: Style = Style { rgb: None, bold: true, dim: false, underline: false };
+pub const STRONG: Style = Style { rgb: None, bg: None, bold: true, dim: false, underline: false };
+pub const VALUE: Style = Style::rgb([122, 178, 247]);
+const PANEL_RGB: [u8; 3] = [22, 27, 34];
+const PANEL: Style = Style { rgb: None, bg: Some(PANEL_RGB), bold: false, dim: false, underline: false };
+
+pub struct Cell {
+    pub icon: Option<char>,
+    pub head: String,
+    pub body: String,
+}
 
 pub fn paint_into(out: &mut String, style: Style, text: impl Display) {
     let styled = style.write_sgr(out, caps().depth);
     let _ = write!(out, "{text}");
     if styled {
         out.push_str("\x1b[0m");
+    }
+}
+
+pub fn panel(row: &str) -> String {
+    let pad = caps().glyphs.pad;
+    let mut fill = String::new();
+    let deep = matches!(caps().depth, Depth::TrueColor | Depth::Ansi256);
+    if !deep || !PANEL.write_sgr(&mut fill, caps().depth) {
+        return format!("{pad}{row} ");
+    }
+    let body = row.replace("\x1b[0m", &format!("\x1b[0m{fill}"));
+    match caps().icons.rounded() {
+        Some((left, right)) => {
+            let edge = Style::rgb(PANEL_RGB);
+            format!("{}{fill} {body} \x1b[0m{}", paint(edge, left), paint(edge, right))
+        }
+        None => format!("{fill}{pad}{body} \x1b[0m"),
     }
 }
 
@@ -139,19 +180,26 @@ pub struct Gauge<'a> {
     pub label: &'a str,
     pub pct: Option<f64>,
     pub growing: bool,
+    pub missing: Option<&'a str>,
 }
 
 impl Gauge<'_> {
-    pub fn render(&self, frame: &Frame) -> String {
+    pub fn head(&self) -> String {
+        paint(LABEL, title(self.label))
+    }
+
+    pub fn body(&self, frame: &Frame) -> String {
         let glyphs = caps().glyphs;
         let mut out = String::with_capacity(64 + frame.bar_width * 24);
-        paint_into(&mut out, LABEL, format_args!("{} ", self.label));
         let Some(pct) = self.pct else {
             if frame.bar_width > 0 {
                 let track: String = std::iter::repeat_n(glyphs.empty, frame.bar_width).collect();
                 paint_into(&mut out, TRACK, format_args!("{track} "));
             }
-            paint_into(&mut out, SOFT, glyphs.missing);
+            match self.missing {
+                Some(text) => paint_into(&mut out, SOFT, title(text)),
+                None => paint_into(&mut out, SOFT, glyphs.missing),
+            }
             return out;
         };
         if frame.bar_width > 0 {
@@ -190,6 +238,10 @@ pub fn duration(ms: u64) -> String {
 pub fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
     chars.next().map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
+}
+
+pub fn title(s: &str) -> String {
+    s.split(' ').map(capitalize).collect::<Vec<_>>().join(" ")
 }
 
 pub fn strip(s: &str) -> String {
@@ -285,7 +337,7 @@ mod tests {
     const FRAME: Frame = Frame { now: 0, bar_width: 4, tight: false };
 
     fn gauge(pct: Option<f64>, growing: bool) -> Gauge<'static> {
-        Gauge { label: "x", pct, growing }
+        Gauge { label: "x", pct, growing, missing: None }
     }
 
     #[test]
@@ -335,16 +387,16 @@ mod tests {
 
     #[test]
     fn gauge_fills_by_usage_and_shows_placeholder() {
-        assert_eq!(strip(&gauge(Some(79.0), false).render(&FRAME)), "x ━━━─ 79%");
-        assert_eq!(strip(&gauge(None, false).render(&FRAME)), "x ──── –");
-        assert_eq!(strip(&gauge(Some(7.4), false).render(&Frame { bar_width: 0, ..FRAME })), "x 7%");
+        assert_eq!(strip(&gauge(Some(79.0), false).body(&FRAME)), "━━━─ 79%");
+        assert_eq!(strip(&gauge(None, false).body(&FRAME)), "──── –");
+        assert_eq!(strip(&gauge(Some(7.4), false).body(&Frame { bar_width: 0, ..FRAME })), "7%");
     }
 
     #[test]
     fn growing_gauge_flashes_its_edge_on_odd_seconds() {
         let odd = Frame { now: 1_000, ..FRAME };
-        assert_eq!(strip(&gauge(Some(50.0), true).render(&odd)), "x ━╸── 50%");
-        assert_eq!(strip(&gauge(Some(50.0), true).render(&FRAME)), "x ━━── 50%");
+        assert_eq!(strip(&gauge(Some(50.0), true).body(&odd)), "━╸── 50%");
+        assert_eq!(strip(&gauge(Some(50.0), true).body(&FRAME)), "━━── 50%");
     }
 
     #[test]

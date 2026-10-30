@@ -12,7 +12,7 @@ fn bar_fill_matches_usage_without_a_pace_marker_at_the_end() {
     let temp = TempDir::new();
     let reset = now_secs() + 360;
     let out = run(&temp, &claude_with(&format!(r#"{{"used_percentage":79,"resets_at":{reset}}}"#)), Some(160));
-    assert!(out.text.contains("sessão ━━━━━━━━── 79%"), "{:?}", out.text);
+    assert!(out.text.contains("Sessão ━━━━━━━━── 79%"), "{:?}", out.text);
     assert!(!out.text.contains('│'), "{:?}", out.text);
 }
 
@@ -28,7 +28,7 @@ fn fresh_window_does_not_show_an_exhaustion_next_to_the_reset() {
 fn clock_shows_seconds_so_it_visibly_ticks() {
     let temp = TempDir::new();
     let out = run(&temp, &claude_with("null"), Some(160));
-    assert!(out.text.trim_end().ends_with("00:01:00"), "{:?}", out.text);
+    assert!(out.text.contains("| Tempo 00:01:00 |"), "{:?}", out.text);
 }
 
 #[test]
@@ -47,15 +47,15 @@ fn agy_uses_the_current_model_family_not_the_most_consumed_bucket() {
                  "gemini-5h":{"remaining_fraction":0.9989992,"reset_in_seconds":17279},
                  "gemini-weekly":{"remaining_fraction":0.0058754333,"reset_in_seconds":194772}}}"#;
     let out = run(&temp, payload, None);
-    assert!(out.text.contains("sessão ────────── 0%"), "{:?}", out.text);
-    assert!(out.text.contains("semana ━━━━━━━━━━ 99%"), "{:?}", out.text);
+    assert!(out.text.contains("Sessão ────────── 0%"), "{:?}", out.text);
+    assert!(out.text.contains("Semana ━━━━━━━━━━ 99%"), "{:?}", out.text);
 }
 
 #[test]
 fn powershell_bom_and_huge_widths_are_harmless() {
     let temp = TempDir::new();
     let out = run(&temp, "\u{feff}{\"model\":{\"display_name\":\"Opus\"},\"terminal_width\":4000000000}", None);
-    assert!(out.text.starts_with("Opus ╱ "), "{:?}", out.text);
+    assert!(out.text.starts_with("Modelo Opus | "), "{:?}", out.text);
 }
 
 #[test]

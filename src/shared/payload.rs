@@ -24,6 +24,8 @@ pub struct Payload {
     pub cost: Option<Cost>,
     pub workspace: Option<Workspace>,
     pub terminal_width: Option<usize>,
+    #[serde(skip)]
+    pub usage_changed_at: Option<u64>,
 }
 
 #[derive(Clone, Default, Deserialize)]

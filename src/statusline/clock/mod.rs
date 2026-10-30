@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::i18n::labels;
-use crate::render::style::{Frame, LABEL, SOFT, STRONG, TRACK, paint};
+use crate::render::style::{Cell, Frame, LABEL, TRACK, VALUE, paint, title};
 use crate::render::terminal::caps;
 use crate::shared::payload::{Host, Payload};
 use crate::shared::state::Session;
@@ -52,19 +52,19 @@ fn file_created(path: &Path) -> Option<u64> {
     Some(created.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64)
 }
 
-pub fn render(ms: u64, frame: &Frame) -> String {
+pub fn cell(ms: u64, frame: &Frame) -> Cell {
     let minutes = ms / 60_000;
     let minute_turned = (ms / 1000) % 60 == 0 && ms > 0;
-    let label = if frame.tight { String::new() } else { paint(LABEL, format_args!("{} ", labels().time)) };
-    let hand = paint(SOFT, format_args!("{} ", caps().glyphs.hands[((frame.now / 1000) % 4) as usize]));
-    let colon = paint(if frame.odd_second() { TRACK } else { STRONG }, ':');
-    let minutes_style = if minute_turned { STRONG.underline() } else { STRONG };
-    format!(
-        "{label}{hand}{}{colon}{}{}",
-        paint(STRONG, format_args!("{:02}", minutes / 60)),
+    let digits = VALUE.bold();
+    let colon = paint(if frame.odd_second() { TRACK } else { digits }, ':');
+    let minutes_style = if minute_turned { digits.underline() } else { digits };
+    let body = format!(
+        "{}{colon}{}{}",
+        paint(digits, format_args!("{:02}", minutes / 60)),
         paint(minutes_style, format_args!("{:02}", minutes % 60)),
-        paint(LABEL, format_args!(":{:02}", (ms / 1000) % 60)),
-    )
+        paint(VALUE, format_args!(":{:02}", (ms / 1000) % 60)),
+    );
+    Cell { icon: caps().icons.timer(frame.now), head: paint(LABEL, title(labels().time)), body }
 }
 
 #[cfg(test)]
@@ -75,14 +75,15 @@ mod tests {
     #[test]
     fn renders_animated_hh_mm() {
         let frame = Frame { now: 1_000, bar_width: 0, tight: false };
-        assert_eq!(strip(&render(3_900_000, &frame)), "tempo ◷ 01:05:00");
-        assert_eq!(strip(&render(59_000, &Frame { tight: true, ..frame })), "◷ 00:00:59");
+        let flat = |cell: Cell| strip(&format!("{} {}", cell.head, cell.body));
+        assert_eq!(flat(cell(3_900_000, &frame)), "Tempo 01:05:00");
+        assert_eq!(flat(cell(59_000, &Frame { tight: true, ..frame })), "Tempo 00:00:59");
     }
 
     #[test]
     fn underlines_minutes_on_the_second_they_turn() {
         let frame = Frame { now: 0, bar_width: 0, tight: true };
-        assert!(render(120_000, &frame).contains("\x1b[1;4m02"));
-        assert!(!render(121_000, &frame).contains("\x1b[1;4m"));
+        assert!(cell(120_000, &frame).body.contains("\x1b[1;4"));
+        assert!(!cell(121_000, &frame).body.contains("\x1b[1;4"));
     }
 }

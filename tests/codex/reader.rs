@@ -27,10 +27,11 @@ fn codex_mode_renders_the_latest_session_with_the_same_line() {
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap().replace('\u{2800}', "");
     let text = text.trim();
-    assert!(text.starts_with("gpt-6-luna - Medium ╱ sessão "), "{text:?}");
-    assert!(text.contains(" 40% ↻ ") && text.contains("semana") && text.contains(" 12%"), "{text:?}");
-    assert!(text.contains("contexto") && text.contains(" 20%"), "{text:?}");
-    assert!(text.contains("tempo"), "{text:?}");
+    assert!(text.lines().next().is_some_and(|row| row.contains("Sessão")), "{text:?}");
+    assert!(text.lines().nth(1).is_some_and(|row| row.trim_start().starts_with("gpt-6-luna Medium")), "{text:?}");
+    assert!(text.contains(" 40% ↻ ") && text.contains("Semana") && text.contains(" 12%"), "{text:?}");
+    assert!(text.contains("Contexto") && text.contains(" 20%"), "{text:?}");
+    assert!(text.contains("Tempo"), "{text:?}");
 }
 
 #[test]

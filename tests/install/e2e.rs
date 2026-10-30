@@ -54,15 +54,20 @@ fn setup_then_each_host_runs_the_configured_command_through_its_shell() {
 
     let mut setup = Command::new(env!("CARGO_BIN_EXE_status_cli"));
     with_home(&mut setup, &temp.0);
+    let serial = crate::setup::SETUP.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     assert!(setup.arg("setup").status().unwrap().success());
+    drop(serial);
 
     let claude_line = host_shell(
         &configured_command(&claude.join("settings.json")),
         r#"{"session_id":"e2e","model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"cost":{"total_duration_ms":61000}}"#,
         &temp.0,
     );
-    assert!(claude_line.trim_start().starts_with("Opus 5.5 - High ╱ sessão"), "{claude_line:?}");
-    assert!(claude_line.trim_end().ends_with("00:01:01"), "{claude_line:?}");
+    let rows: Vec<&str> = claude_line.lines().collect();
+    assert_eq!(rows.len(), 2, "{claude_line:?}");
+    assert!(rows[0].contains("Sessão") && rows[0].contains("Modelo"), "{claude_line:?}");
+    assert!(rows[1].contains("Opus 5.5 High") && rows[1].contains("00:01:01"), "{claude_line:?}");
+    assert!(rows[1].trim_end().ends_with("By Isllan T."), "{claude_line:?}");
 
     let agy_line = host_shell(
         &configured_command(&agy.join("settings.json")),
@@ -70,7 +75,7 @@ fn setup_then_each_host_runs_the_configured_command_through_its_shell() {
             "quota":{"gemini-5h":{"remaining_fraction":0.5,"reset_in_seconds":600}},"terminal_width":120}"#,
         &temp.0,
     );
-    assert!(agy_line.trim_start().starts_with("Gemini 3.8 Flash - High ╱ sessão"), "{agy_line:?}");
+    assert!(agy_line.lines().nth(1).is_some_and(|row| row.contains("Gemini 3.8 Flash High")), "{agy_line:?}");
 
     let mut doctor = Command::new(env!("CARGO_BIN_EXE_status_cli"));
     with_home(&mut doctor, &temp.0);

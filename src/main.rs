@@ -183,7 +183,9 @@ fn run_codex(args: Vec<String>, shim: Option<PathBuf>) {
     if watch {
         loop {
             let mut stdout = io::stdout().lock();
-            let _ = write!(stdout, "\r\x1b[2K{}", render(terminal_width()));
+            let frame = render(terminal_width());
+            let (status, credit) = frame.split_once('\n').unwrap_or((&frame, ""));
+            let _ = write!(stdout, "\r\x1b[2K{status}\n\r\x1b[2K{credit}\x1b[1A\r");
             let _ = stdout.flush();
             drop(stdout);
             thread::sleep(Duration::from_millis(1000 - now_millis() % 1000));

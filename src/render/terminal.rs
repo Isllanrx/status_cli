@@ -1,4 +1,5 @@
 use std::env;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,9 +26,9 @@ const UNICODE: Glyphs = Glyphs {
     fill: '━',
     empty: '─',
     edge: '╸',
-    separator: '╱',
+    separator: '│',
     reset: '↻',
-    exhaust: '⇥',
+    exhaust: '→',
     missing: '–',
     pad: '\u{2800}',
     hands: ['◴', '◷', '◶', '◵'],
@@ -37,7 +38,7 @@ const ASCII: Glyphs = Glyphs {
     fill: '=',
     empty: '-',
     edge: '>',
-    separator: '/',
+    separator: '|',
     reset: '~',
     exhaust: '!',
     missing: '-',
@@ -51,9 +52,61 @@ const TRUECOLOR_TERMS: [&str; 7] =
     ["xterm-kitty", "alacritty", "foot", "foot-extra", "xterm-ghostty", "wezterm", "contour"];
 const VTE_TRUECOLOR: u32 = 3600;
 
+const NERD_FONT: &str = "CaskaydiaCoveNerdFont-Regular.ttf";
+const NERD_ICONS: [char; 4] = ['\u{f06a9}', '\u{f0150}', '\u{f00ed}', '\u{f01bc}'];
+const NERD_TIMER: char = '\u{f051b}';
+const NERD_CAPS: (char, char) = ('\u{e0b6}', '\u{e0b4}');
+const PLAIN_ICONS: [char; 4] = ['◆', '◷', '▦', '≡'];
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Icons {
+    None,
+    Plain,
+    Nerd,
+}
+
+impl Icons {
+    pub fn model(self) -> Option<char> {
+        self.pick(0)
+    }
+
+    pub fn session(self) -> Option<char> {
+        self.pick(1)
+    }
+
+    pub fn week(self) -> Option<char> {
+        self.pick(2)
+    }
+
+    pub fn context(self) -> Option<char> {
+        self.pick(3)
+    }
+
+    pub fn timer(self, now: u64) -> Option<char> {
+        match self {
+            Icons::None => None,
+            Icons::Plain => Some(UNICODE.hands[((now / 1000) % 4) as usize]),
+            Icons::Nerd => Some(NERD_TIMER),
+        }
+    }
+
+    pub fn rounded(self) -> Option<(char, char)> {
+        (self == Icons::Nerd).then_some(NERD_CAPS)
+    }
+
+    fn pick(self, slot: usize) -> Option<char> {
+        match self {
+            Icons::None => None,
+            Icons::Plain => Some(PLAIN_ICONS[slot]),
+            Icons::Nerd => Some(NERD_ICONS[slot]),
+        }
+    }
+}
+
 pub struct Caps {
     pub depth: Depth,
     pub glyphs: &'static Glyphs,
+    pub icons: Icons,
 }
 
 pub fn caps() -> &'static Caps {
@@ -67,7 +120,28 @@ fn detect(var: impl Fn(&str) -> Option<String>) -> Caps {
     let locale = var("LC_ALL").or_else(|| var("LC_CTYPE")).or_else(|| var("LANG")).unwrap_or_default();
     let wide_ambiguous = ["ja", "zh", "ko"].iter().any(|cjk| locale.starts_with(cjk));
     let ascii = var("STATUS_CLI_ASCII").is_some() || limited_console || wide_ambiguous;
-    Caps { depth: depth(&var, &term), glyphs: if ascii { &ASCII } else { &UNICODE } }
+    let icons = match var("STATUS_CLI_ICONS").as_deref() {
+        _ if ascii => Icons::None,
+        Some("none") => Icons::None,
+        Some("plain") => Icons::Plain,
+        Some("nerd") => Icons::Nerd,
+        _ if nerd_font_installed(&var) => Icons::Nerd,
+        _ => Icons::Plain,
+    };
+    Caps { depth: depth(&var, &term), glyphs: if ascii { &ASCII } else { &UNICODE }, icons }
+}
+
+fn nerd_font_installed(var: &impl Fn(&str) -> Option<String>) -> bool {
+    let home = var("HOME").or_else(|| var("USERPROFILE")).map(PathBuf::from);
+    [
+        var("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join("Microsoft").join("Windows").join("Fonts")),
+        var("WINDIR").map(|dir| PathBuf::from(dir).join("Fonts")),
+        home.as_ref().map(|home| home.join(".local").join("share").join("fonts")),
+        home.as_ref().map(|home| home.join("Library").join("Fonts")),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|dir| dir.join(NERD_FONT).is_file())
 }
 
 fn depth(var: &impl Fn(&str) -> Option<String>, term: &str) -> Depth {
@@ -174,6 +248,21 @@ mod tests {
     fn multiplexers_and_plain_xterm_get_256_colors() {
         assert_eq!(caps_for(&[("TERM", "tmux-256color")]).depth, Depth::Ansi256);
         assert_eq!(caps_for(&[("TERM", "xterm")]).depth, Depth::Ansi256);
+    }
+
+    #[test]
+    fn icons_follow_the_setting_then_the_installed_nerd_font() {
+        assert_eq!(caps_for(&[("STATUS_CLI_ICONS", "nerd")]).icons, Icons::Nerd);
+        assert_eq!(caps_for(&[("STATUS_CLI_ICONS", "nerd"), ("STATUS_CLI_ASCII", "1")]).icons, Icons::None);
+        let fonts = env::temp_dir().join(format!("status_cli-fonts-{}", std::process::id()));
+        let windows = fonts.join("Microsoft").join("Windows").join("Fonts");
+        std::fs::create_dir_all(&windows).unwrap();
+        let local = fonts.to_str().unwrap().to_owned();
+        assert_eq!(caps_for(&[("LOCALAPPDATA", &local)]).icons, Icons::Plain);
+        std::fs::write(windows.join(NERD_FONT), b"").unwrap();
+        assert_eq!(caps_for(&[("LOCALAPPDATA", &local)]).icons, Icons::Nerd);
+        assert_eq!(caps_for(&[("LOCALAPPDATA", &local), ("STATUS_CLI_ICONS", "plain")]).icons, Icons::Plain);
+        std::fs::remove_dir_all(&fonts).unwrap();
     }
 
     #[test]

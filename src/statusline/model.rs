@@ -1,7 +1,10 @@
-use crate::render::style::{SOFT, STRONG, capitalize, heat, paint};
+use crate::i18n::labels;
+use crate::render::style::{Cell, LABEL, SOFT, STRONG, capitalize, heat, paint, title};
+use crate::render::terminal::caps;
 use crate::shared::payload::{Host, Payload};
 
 const EFFORT_HEAT: f64 = 65.0;
+const PILL: [u8; 3] = [72, 56, 18];
 
 pub struct Model {
     name: String,
@@ -25,14 +28,17 @@ fn short_name(display_name: &str) -> Option<String> {
 }
 
 impl Model {
+    pub fn cell(&self) -> Cell {
+        Cell { icon: caps().icons.model(), head: paint(LABEL, title(labels().model)), body: self.render() }
+    }
+
     pub fn render(&self) -> String {
         let mut out = paint(STRONG, &self.name);
         if let Some(effort) = &self.effort {
-            out += &paint(SOFT, " - ");
-            out += &paint(heat(EFFORT_HEAT), effort);
+            out += &paint(heat(EFFORT_HEAT).bold().on(PILL), format_args!(" {effort} "));
         }
         if self.fast {
-            out += &paint(SOFT, " · ");
+            out += &paint(SOFT, if self.effort.is_some() { "· " } else { " · " });
             out += &paint(heat(70.0).bold(), "fast");
         }
         out
@@ -46,25 +52,25 @@ mod tests {
     use crate::shared::payload::parse;
 
     fn line(json: &str) -> Option<String> {
-        read(&parse(json)).map(|m| strip(&m.render()))
+        read(&parse(json)).map(|m| strip(&m.render()).trim_end().to_owned())
     }
 
     #[test]
     fn claude_shows_first_word_and_effort() {
         let json = r#"{"model":{"display_name":"Opus 5.5"},"effort":{"level":"xhigh"}}"#;
-        assert_eq!(line(json).as_deref(), Some("Opus 5.5 - Xhigh"));
+        assert_eq!(line(json).as_deref(), Some("Opus 5.5 Xhigh"));
     }
 
     #[test]
     fn agy_uses_execution_mode() {
         let json = r#"{"product":"antigravity","model":{"display_name":"Gemini 3"},"execution_mode":"planning"}"#;
-        assert_eq!(line(json).as_deref(), Some("Gemini 3 - Planning"));
+        assert_eq!(line(json).as_deref(), Some("Gemini 3 Planning"));
     }
 
     #[test]
     fn fast_mode_adds_a_badge() {
         let json = r#"{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"fast_mode":true}"#;
-        assert_eq!(line(json).as_deref(), Some("Opus 5.5 - High · fast"));
+        assert_eq!(line(json).as_deref(), Some("Opus 5.5 High · fast"));
     }
 
     #[test]
@@ -90,7 +96,7 @@ mod tests {
     #[test]
     fn agy_reads_effort_from_the_model() {
         let json = r#"{"product":"antigravity","model":{"display_name":"Gemini 3.8 Flash (High)","effort":"high"}}"#;
-        assert_eq!(line(json).as_deref(), Some("Gemini 3.8 Flash - High"));
+        assert_eq!(line(json).as_deref(), Some("Gemini 3.8 Flash High"));
     }
 
     #[test]

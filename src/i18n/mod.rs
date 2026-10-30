@@ -9,6 +9,7 @@ use scripts::*;
 
 pub struct Labels {
     pub code: &'static str,
+    pub model: &'static str,
     pub session: &'static str,
     pub week: &'static str,
     pub compact: &'static str,
@@ -16,6 +17,8 @@ pub struct Labels {
     pub quota: &'static str,
     pub time: &'static str,
     pub resets_in: &'static str,
+    pub age: &'static str,
+    pub paused: &'static str,
     pub limit_near: &'static str,
     pub limit_reached: &'static str,
 }

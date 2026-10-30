@@ -1,3 +1,4 @@
+pub const STATUS_ROWS: u16 = 2;
 const MAX_ESCAPE_BYTES: usize = 64;
 const SCREEN_SWITCHES: [&[u8]; 7] =
     [b"\x1b[?1049h", b"\x1b[?1049l", b"\x1b[?1047h", b"\x1b[?1047l", b"\x1b[?47h", b"\x1b[?47l", b"\x1bc"];
@@ -18,7 +19,7 @@ impl Stream {
         Self {
             cols,
             rows,
-            parser: vt100::Parser::new(rows - 1, cols, 0),
+            parser: vt100::Parser::new(rows - STATUS_ROWS, cols, 0),
             pending: Vec::new(),
             synchronized: false,
             hyperlink: false,
@@ -26,30 +27,27 @@ impl Stream {
     }
 
     pub fn reserve(&self) -> Vec<u8> {
-        format!("\n\x1b[1A\x1b7\x1b[1;{}r\x1b8", self.rows - 1).into_bytes()
+        let room = "\n".repeat(STATUS_ROWS.into());
+        format!("{room}\x1b[{STATUS_ROWS}A\x1b7\x1b[1;{}r\x1b8", self.rows - STATUS_ROWS).into_bytes()
     }
 
     pub fn seed_cursor(&mut self, row: u16, col: u16) {
-        self.parser.process(format!("\x1b[{};{}H", row.min(self.rows - 2) + 1, col + 1).as_bytes());
+        self.parser.process(format!("\x1b[{};{}H", row.min(self.rows - STATUS_ROWS - 1) + 1, col + 1).as_bytes());
     }
 
     pub fn release(&self) -> Vec<u8> {
         let screen = self.parser.screen();
         let (row, col) = screen.cursor_position();
         let leave_alternate = if screen.alternate_screen() { "\x1b[?1049l" } else { "" };
-        format!(
-            "{leave_alternate}{RESTORE_MODES}\x1b[r\x1b[{};1H\x1b[0m\x1b[2K\x1b[{};{}H",
-            self.rows,
-            row + 1,
-            col + 1
-        )
-        .into_bytes()
+        let clear: String =
+            self.status_rows().map(|status_row| format!("\x1b[{status_row};1H\x1b[0m\x1b[2K")).collect();
+        format!("{leave_alternate}{RESTORE_MODES}\x1b[r{clear}\x1b[{};{}H", row + 1, col + 1).into_bytes()
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Vec<u8> {
         self.cols = cols;
         self.rows = rows;
-        self.parser.screen_mut().set_size(rows - 1, cols);
+        self.parser.screen_mut().set_size(rows - STATUS_ROWS, cols);
         self.region()
     }
 
@@ -60,7 +58,7 @@ impl Stream {
         self.pending = data.split_off(data.len() - keep);
         self.parser.process(&data);
         self.track_modes(&data);
-        let mut out = clamp_scroll_regions(&data, self.rows - 1);
+        let mut out = clamp_scroll_regions(&data, self.rows - STATUS_ROWS);
         if SCREEN_SWITCHES.iter().any(|switch| find(&data, switch).is_some()) {
             out.extend(self.region());
         }
@@ -76,8 +74,15 @@ impl Stream {
         let screen = self.parser.screen();
         let (row, col) = screen.cursor_position();
         let show = if screen.hide_cursor() { "" } else { "\x1b[?25h" };
-        let mut out = format!("\x1b[?25l\x1b[{};1H\x1b[0m\x1b[2K{line}\x1b[0m\x1b[{};{}H", self.rows, row + 1, col + 1)
-            .into_bytes();
+        let lines: Vec<&str> = line.split('\n').collect();
+        let blank = usize::from(STATUS_ROWS).saturating_sub(lines.len());
+        let mut lines = std::iter::repeat_n("", blank).chain(lines);
+        let mut out = String::from("\x1b[?25l");
+        for status_row in self.status_rows() {
+            let text = lines.next().unwrap_or_default();
+            out += &format!("\x1b[{status_row};1H\x1b[0m\x1b[2K{text}\x1b[0m");
+        }
+        let mut out = format!("{out}\x1b[{};{}H", row + 1, col + 1).into_bytes();
         out.extend_from_slice(&screen.attributes_formatted());
         out.extend_from_slice(show.as_bytes());
         out
@@ -85,7 +90,11 @@ impl Stream {
 
     fn region(&self) -> Vec<u8> {
         let (row, col) = self.parser.screen().cursor_position();
-        format!("\x1b[1;{}r\x1b[{};{}H", self.rows - 1, row + 1, col + 1).into_bytes()
+        format!("\x1b[1;{}r\x1b[{};{}H", self.rows - STATUS_ROWS, row + 1, col + 1).into_bytes()
+    }
+
+    pub fn status_rows(&self) -> std::ops::RangeInclusive<u16> {
+        self.rows - STATUS_ROWS + 1..=self.rows
     }
 
     fn track_modes(&mut self, data: &[u8]) {
@@ -192,8 +201,9 @@ mod tests {
     fn status_row_restores_the_child_cursor_and_visibility() {
         let mut stream = Stream::new(80, 24);
         stream.child_output(b"\x1b[5;7Hx");
-        let frame = String::from_utf8(stream.status("line")).unwrap();
-        assert!(frame.starts_with("\x1b[?25l\x1b[24;1H\x1b[0m\x1b[2Kline\x1b[0m\x1b[5;8H"), "{frame:?}");
+        let frame = String::from_utf8(stream.status("head\nbody")).unwrap();
+        let expected = "\x1b[?25l\x1b[23;1H\x1b[0m\x1b[2Khead\x1b[0m\x1b[24;1H\x1b[0m\x1b[2Kbody\x1b[0m\x1b[5;8H";
+        assert!(frame.starts_with(expected), "{frame:?}");
         assert!(frame.ends_with("\x1b[?25h"), "{frame:?}");
     }
 
@@ -217,7 +227,7 @@ mod tests {
         let mut stream = Stream::new(80, 24);
         stream.seed_cursor(9, 4);
         let out = String::from_utf8(stream.child_output(b"\x1b[?1049h")).unwrap();
-        assert!(out.contains("\x1b[1;23r\x1b["), "{out:?}");
+        assert!(out.contains("\x1b[1;22r\x1b["), "{out:?}");
         assert!(String::from_utf8(stream.release()).unwrap().starts_with("\x1b[?1049l"));
     }
 }

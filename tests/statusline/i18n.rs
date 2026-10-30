@@ -43,7 +43,12 @@ fn every_language_labels_the_line_and_keeps_the_width() {
     for (lang, session, compact, time) in LANGUAGES {
         let out = run_with(&temp, payload, Some(120), &[("STATUS_CLI_LANG", lang)]);
         for label in [session, compact, time] {
-            assert!(out.text.contains(label), "{lang}: {:?}", out.text);
+            let words = label.split(' ').map(|word| {
+                let mut chars = word.chars();
+                chars.next().into_iter().flat_map(char::to_uppercase).chain(chars).collect::<String>()
+            });
+            let label = words.collect::<Vec<_>>().join(" ");
+            assert!(out.text.contains(&label), "{lang}: {:?}", out.text);
         }
         assert_eq!(columns(&out.visible), 112, "{lang}: {:?}", out.visible);
     }

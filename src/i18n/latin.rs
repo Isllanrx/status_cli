@@ -2,6 +2,7 @@ use super::Labels;
 
 pub const ENGLISH: Labels = Labels {
     code: "en",
+    model: "model",
     session: "session",
     week: "week",
     compact: "compact",
@@ -9,6 +10,8 @@ pub const ENGLISH: Labels = Labels {
     quota: "quota",
     time: "time",
     resets_in: "resets in",
+    age: "unchanged for {}",
+    paused: "suspended",
     limit_near: "Usage limit close: before starting long work, tell the user these percentages, keep the task notes \
                  current (done and next steps) and ask before starting subagents or workflows.",
     limit_reached: "Usage limit nearly exhausted: do not start new tasks. Record what is done and the next steps in \
@@ -17,6 +20,7 @@ pub const ENGLISH: Labels = Labels {
 
 pub const PORTUGUESE: Labels = Labels {
     code: "pt-BR",
+    model: "modelo",
     session: "sessão",
     week: "semana",
     compact: "compactar",
@@ -24,6 +28,8 @@ pub const PORTUGUESE: Labels = Labels {
     quota: "cota",
     time: "tempo",
     resets_in: "reinicia em",
+    age: "sem mudança há {}",
+    paused: "suspensa",
     limit_near: "Limite de uso próximo: antes de trabalho longo, avise o usuário com estes percentuais, mantenha as \
                  notas da tarefa atualizadas (feito e próximos passos) e confirme antes de abrir subagentes ou \
                  workflows.",
@@ -34,6 +40,7 @@ pub const PORTUGUESE: Labels = Labels {
 
 pub const SPANISH: Labels = Labels {
     code: "es",
+    model: "modelo",
     session: "sesión",
     week: "semana",
     compact: "compactar",
@@ -41,6 +48,8 @@ pub const SPANISH: Labels = Labels {
     quota: "cuota",
     time: "tiempo",
     resets_in: "se reinicia en",
+    age: "sin cambios hace {}",
+    paused: "suspendida",
     limit_near: "Límite de uso cercano: antes de un trabajo largo, informa al usuario de estos porcentajes, mantén al \
                  día las notas de la tarea (hecho y próximos pasos) y pide confirmación antes de iniciar subagentes o \
                  workflows.",
@@ -51,6 +60,7 @@ pub const SPANISH: Labels = Labels {
 
 pub const FRENCH: Labels = Labels {
     code: "fr",
+    model: "modèle",
     session: "session",
     week: "semaine",
     compact: "compacter",
@@ -58,6 +68,8 @@ pub const FRENCH: Labels = Labels {
     quota: "quota",
     time: "temps",
     resets_in: "réinitialisé dans",
+    age: "inchangé depuis {}",
+    paused: "suspendue",
     limit_near: "Limite d'utilisation proche : avant un travail long, indique ces pourcentages à l'utilisateur, tiens \
                  à jour les notes de la tâche (fait et prochaines étapes) et demande confirmation avant de lancer des \
                  sous-agents ou des workflows.",
@@ -68,6 +80,7 @@ pub const FRENCH: Labels = Labels {
 
 pub const GERMAN: Labels = Labels {
     code: "de",
+    model: "modell",
     session: "Sitzung",
     week: "Woche",
     compact: "verdichten",
@@ -75,6 +88,8 @@ pub const GERMAN: Labels = Labels {
     quota: "Kontingent",
     time: "Zeit",
     resets_in: "zurückgesetzt in",
+    age: "unverändert seit {}",
+    paused: "ausgesetzt",
     limit_near: "Nutzungslimit nahe: Vor längerer Arbeit dem Nutzer diese Prozentwerte nennen, die Aufgabennotizen \
                  aktuell halten (erledigt und nächste Schritte) und vor dem Start von Subagenten oder Workflows \
                  nachfragen.",
@@ -85,6 +100,7 @@ pub const GERMAN: Labels = Labels {
 
 pub const ITALIAN: Labels = Labels {
     code: "it",
+    model: "modello",
     session: "sessione",
     week: "settimana",
     compact: "compattare",
@@ -92,6 +108,8 @@ pub const ITALIAN: Labels = Labels {
     quota: "quota",
     time: "tempo",
     resets_in: "si azzera tra",
+    age: "invariato da {}",
+    paused: "sospesa",
     limit_near: "Limite di utilizzo vicino: prima di un lavoro lungo, comunica all'utente queste percentuali, tieni \
                  aggiornate le note dell'attività (fatto e prossimi passi) e chiedi conferma prima di avviare \
                  subagenti o workflow.",
@@ -102,6 +120,7 @@ pub const ITALIAN: Labels = Labels {
 
 pub const DUTCH: Labels = Labels {
     code: "nl",
+    model: "model",
     session: "sessie",
     week: "week",
     compact: "compacteren",
@@ -109,6 +128,8 @@ pub const DUTCH: Labels = Labels {
     quota: "quotum",
     time: "tijd",
     resets_in: "reset over",
+    age: "{} ongewijzigd",
+    paused: "opgeschort",
     limit_near: "Gebruikslimiet bijna bereikt: meld de gebruiker vóór langer werk deze percentages, houd de \
                  taaknotities bij (gedaan en volgende stappen) en vraag bevestiging voordat je subagents of \
                  workflows start.",
@@ -118,6 +139,7 @@ pub const DUTCH: Labels = Labels {
 
 pub const POLISH: Labels = Labels {
     code: "pl",
+    model: "model",
     session: "sesja",
     week: "tydzień",
     compact: "kompaktowanie",
@@ -125,6 +147,8 @@ pub const POLISH: Labels = Labels {
     quota: "limit",
     time: "czas",
     resets_in: "reset za",
+    age: "bez zmian od {}",
+    paused: "wstrzymany",
     limit_near: "Limit użycia blisko: przed dłuższą pracą podaj użytkownikowi te wartości procentowe, aktualizuj \
                  notatki zadania (zrobione i kolejne kroki) i pytaj o zgodę przed uruchomieniem subagentów lub \
                  workflowów.",
@@ -135,6 +159,7 @@ pub const POLISH: Labels = Labels {
 
 pub const INDONESIAN: Labels = Labels {
     code: "id",
+    model: "model",
     session: "sesi",
     week: "minggu",
     compact: "ringkas",
@@ -142,6 +167,8 @@ pub const INDONESIAN: Labels = Labels {
     quota: "kuota",
     time: "waktu",
     resets_in: "reset dalam",
+    age: "tetap selama {}",
+    paused: "ditangguhkan",
     limit_near: "Batas pemakaian hampir tercapai: sebelum pekerjaan panjang, beri tahu pengguna persentase ini, \
                  perbarui catatan tugas (selesai dan langkah berikutnya), dan minta konfirmasi sebelum menjalankan \
                  subagen atau workflow.",
@@ -152,6 +179,7 @@ pub const INDONESIAN: Labels = Labels {
 
 pub const TURKISH: Labels = Labels {
     code: "tr",
+    model: "model",
     session: "oturum",
     week: "hafta",
     compact: "sıkıştır",
@@ -159,6 +187,8 @@ pub const TURKISH: Labels = Labels {
     quota: "kota",
     time: "süre",
     resets_in: "sıfırlanmaya",
+    age: "{} değişmedi",
+    paused: "askıda",
     limit_near: "Kullanım sınırı yakın: uzun bir işe başlamadan önce kullanıcıya bu yüzdeleri bildir, görev \
                  notlarını güncel tut (yapılanlar ve sonraki adımlar) ve alt ajan veya iş akışı başlatmadan önce \
                  onay iste.",
@@ -168,6 +198,7 @@ pub const TURKISH: Labels = Labels {
 
 pub const VIETNAMESE: Labels = Labels {
     code: "vi",
+    model: "mô hình",
     session: "phiên",
     week: "tuần",
     compact: "nén",
@@ -175,6 +206,8 @@ pub const VIETNAMESE: Labels = Labels {
     quota: "hạn mức",
     time: "thời gian",
     resets_in: "đặt lại sau",
+    age: "không đổi {}",
+    paused: "tạm ngưng",
     limit_near: "Sắp chạm giới hạn sử dụng: trước khi làm việc dài, hãy báo cho người dùng các phần trăm này, cập \
                  nhật ghi chú công việc (đã xong và bước tiếp theo) và hỏi xác nhận trước khi chạy subagent hoặc \
                  workflow.",

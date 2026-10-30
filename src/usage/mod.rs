@@ -16,6 +16,8 @@ const SAME_WINDOW_MS: u64 = 15 * 60_000;
 struct Reading {
     used: f64,
     resets_at: u64,
+    #[serde(default)]
+    changed_at: u64,
 }
 
 type Readings = BTreeMap<String, Reading>;
@@ -63,13 +65,16 @@ fn readings(payload: &Payload, now: u64) -> Readings {
     if let Some(limits) = &payload.rate_limits {
         for (key, window) in [("five_hour", &limits.five_hour), ("seven_day", &limits.seven_day)] {
             if let Some(Window { used_percentage: Some(used), resets_at: Some(resets_at) }) = window {
-                out.insert(key.to_owned(), Reading { used: *used, resets_at: (resets_at * 1000.0) as u64 });
+                out.insert(
+                    key.to_owned(),
+                    Reading { used: *used, resets_at: (resets_at * 1000.0) as u64, changed_at: now },
+                );
             }
         }
     }
     for (key, quota) in payload.quota.iter().flatten() {
         if let (Some(used), Some(resets_at)) = (quota.used(), quota.resets_at(now)) {
-            out.insert(key.clone(), Reading { used, resets_at });
+            out.insert(key.clone(), Reading { used, resets_at, changed_at: now });
         }
     }
     out
@@ -87,10 +92,15 @@ fn merge(stored: &Store, source: Option<String>, current: Readings, now: u64) ->
     for (key, reading) in live(&current) {
         let last = previous.as_ref().and_then(|p| p.get(&key)).filter(|old| same(old, &reading));
         let changed = previous.is_some() && last.is_none();
-        let next = match shared.get(&key) {
+        let known = shared.get(&key);
+        let mut next = match known {
             Some(known) if newer_window(known, &reading) => *known,
             Some(known) if !changed && !newer_window(&reading, known) => *known,
             _ => reading,
+        };
+        next.changed_at = match known {
+            Some(known) if same(known, &next) && known.changed_at > 0 => known.changed_at,
+            _ => now,
         };
         shared.insert(key.clone(), next);
         reported.insert(key, last.copied().unwrap_or(reading));
@@ -117,6 +127,12 @@ fn apply(payload: &mut Payload, merged: &Readings, now: u64) {
     if merged.is_empty() {
         return;
     }
+    let shown: Vec<&str> = match payload.host() {
+        Host::Agy => payload.quota.iter().flat_map(|quota| quota.keys().map(String::as_str)).collect(),
+        _ => vec!["five_hour", "seven_day"],
+    };
+    payload.usage_changed_at =
+        shown.iter().filter_map(|key| merged.get(*key)).map(|r| r.changed_at).filter(|at| *at > 0).max();
     match payload.host() {
         Host::Claude | Host::Codex => {
             let limits = payload.rate_limits.get_or_insert_with(RateLimits::default);
@@ -148,7 +164,7 @@ mod tests {
     const NOW: u64 = 1_000_000_000;
 
     fn reading(used: f64, resets_at: u64) -> Reading {
-        Reading { used, resets_at }
+        Reading { used, resets_at, changed_at: NOW }
     }
 
     fn one(key: &str, r: Reading) -> Readings {
@@ -190,6 +206,15 @@ mod tests {
         assert_eq!(fresh.shared["five_hour"], reading(2.0, NOW + 5 * 3_600_000));
         let stale = merge(&fresh, Some("c".to_owned()), one("five_hour", reading(90.0, NOW + 60_000)), NOW);
         assert_eq!(stale.shared["five_hour"], reading(2.0, NOW + 5 * 3_600_000));
+    }
+
+    #[test]
+    fn a_reading_keeps_the_time_it_last_changed() {
+        let stored = store("a", "five_hour", Reading { changed_at: NOW - 600_000, ..reading(20.0, NOW + 3_600_000) });
+        let same = merge(&stored, Some("b".to_owned()), one("five_hour", reading(20.0, NOW + 3_600_000)), NOW);
+        assert_eq!(same.shared["five_hour"].changed_at, NOW - 600_000);
+        let moved = merge(&stored, Some("a".to_owned()), one("five_hour", reading(21.0, NOW + 3_600_000)), NOW);
+        assert_eq!(moved.shared["five_hour"].changed_at, NOW);
     }
 
     #[test]

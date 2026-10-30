@@ -1,6 +1,7 @@
 use crate::claude::AutoCompact;
 use crate::i18n::labels;
-use crate::render::style::{Frame, Gauge};
+use crate::render::style::{Cell, Frame, Gauge};
+use crate::render::terminal::caps;
 use crate::shared::payload::{Host, Payload};
 use crate::shared::state::{Motion, Session};
 
@@ -33,9 +34,10 @@ fn compact_progress(used: f64, size: f64, auto_compact: AutoCompact) -> Option<f
 }
 
 impl Context {
-    pub fn render(&self, frame: &Frame) -> String {
+    pub fn cell(&self, frame: &Frame) -> Cell {
         let (pct, growing) = self.motion.as_ref().map_or((None, false), |m| (Some(m.shown), m.growing));
-        Gauge { label: self.label, pct, growing }.render(frame)
+        let gauge = Gauge { label: self.label, pct, growing, missing: None };
+        Cell { icon: caps().icons.context(), head: gauge.head(), body: gauge.body(frame) }
     }
 }
 
@@ -48,13 +50,14 @@ mod tests {
     fn line(json: &str, auto_compact: AutoCompact) -> String {
         let mut session = Session::detached(0);
         let context = read(&parse(json), auto_compact, &mut session);
-        strip(&context.render(&Frame { now: 0, bar_width: 0, tight: false }))
+        let cell = context.cell(&Frame { now: 0, bar_width: 0, tight: false });
+        strip(&format!("{} {}", cell.head, cell.body))
     }
 
     #[test]
     fn claude_measures_progress_towards_auto_compact() {
         let json = r#"{"context_window":{"used_percentage":48,"context_window_size":200000}}"#;
-        assert_eq!(line(json, AutoCompact::default()), "compactar 57%");
+        assert_eq!(line(json, AutoCompact::default()), "Compactar 57%");
     }
 
     #[test]
@@ -92,12 +95,12 @@ mod tests {
     #[test]
     fn claude_without_auto_compact_shows_raw_context() {
         let json = r#"{"context_window":{"used_percentage":48,"context_window_size":200000}}"#;
-        assert_eq!(line(json, AutoCompact { enabled: false, ..AutoCompact::default() }), "contexto 48%");
+        assert_eq!(line(json, AutoCompact { enabled: false, ..AutoCompact::default() }), "Contexto 48%");
     }
 
     #[test]
     fn agy_shows_raw_context_usage() {
         let json = r#"{"product":"antigravity","context_window":{"used_percentage":40}}"#;
-        assert_eq!(line(json, AutoCompact::default()), "contexto 40%");
+        assert_eq!(line(json, AutoCompact::default()), "Contexto 40%");
     }
 }

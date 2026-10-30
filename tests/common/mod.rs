@@ -39,6 +39,7 @@ pub struct Output {
     pub visible: String,
     pub text: String,
     pub width: usize,
+    pub head: String,
 }
 
 pub fn run(temp: &TempDir, input: &str, columns: Option<usize>) -> Output {
@@ -60,6 +61,7 @@ pub fn run_with(temp: &TempDir, input: &str, columns: Option<usize>, vars: &[(&s
         .env("XDG_RUNTIME_DIR", &temp.0)
         .env_remove("STATUS_CLI_LOG")
         .env("STATUS_CLI_LANG", "pt")
+        .env("STATUS_CLI_ICONS", "plain")
         .env_remove("STATUS_CLI_COLOR")
         .env_remove("STATUS_CLI_ASCII")
         .env_remove("NO_COLOR")
@@ -88,7 +90,35 @@ pub fn run_with(temp: &TempDir, input: &str, columns: Option<usize>, vars: &[(&s
             _ => {}
         }
     }
-    Output { text: visible.replace('\u{2800}', ""), width: visible.chars().count(), visible, raw }
+    let (head, visible) = match visible.split_once('\n') {
+        Some((head, body)) => (head.replace('\u{2800}', "").trim().to_owned(), body.to_owned()),
+        None => (String::new(), visible),
+    };
+    let text = flatten(&head, &visible.replace('\u{2800}', ""));
+    Output { text, width: visible.chars().count(), visible, raw, head }
+}
+
+fn flatten(head: &str, body: &str) -> String {
+    let split = |row: &str| row.split(['│', '|']).map(|cell| cell.trim().to_owned()).collect::<Vec<_>>();
+    let icon = |cell: &str| {
+        let mut chars = cell.chars();
+        match (chars.next(), chars.next()) {
+            (Some('◆' | '◷' | '▦' | '≡' | '◴' | '◵' | '◶'), Some(' ')) => chars.as_str().to_owned(),
+            _ => cell.to_owned(),
+        }
+    };
+    let heads = split(head);
+    let bodies = split(body);
+    let offset = bodies.len().saturating_sub(heads.len());
+    bodies
+        .iter()
+        .enumerate()
+        .map(|(i, body)| {
+            let head = i.checked_sub(offset).and_then(|i| heads.get(i)).map(|h| icon(h)).unwrap_or_default();
+            format!("{head} {}", icon(body)).trim().to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 pub fn now_secs() -> u64 {
@@ -109,6 +139,7 @@ pub fn claude(session: &str, duration_ms: u64) -> String {
 }
 
 pub fn assert_clock(text: &str, hhmm: &str) {
-    let clock = text.rsplit(' ').next().unwrap_or_default();
+    let cell = text.split(" | ").find(|cell| cell.starts_with("Tempo ")).unwrap_or_default();
+    let clock = cell.rsplit(' ').next().unwrap_or_default();
     assert!(clock.starts_with(hhmm) && clock.len() == hhmm.len() + 3, "{text:?} should show {hhmm}:ss");
 }

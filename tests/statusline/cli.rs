@@ -6,10 +6,10 @@ use std::time::{Duration, SystemTime};
 fn claude_line_shows_every_segment() {
     let temp = TempDir::new();
     let out = run(&temp, &claude("a", 3_900_000), Some(160));
-    assert!(out.text.starts_with("Opus 5.5 - High ╱ sessão "), "{:?}", out.text);
+    assert!(out.text.starts_with("Modelo Opus 5.5 High | Sessão "), "{:?}", out.text);
     assert!(out.text.contains("72% ↻ 1h29m") || out.text.contains("72% ↻ 1h30m"), "{:?}", out.text);
-    assert!(out.text.contains(" 31% ╱ compactar "), "{:?}", out.text);
-    assert!(out.text.contains(" 57% ╱ tempo "), "{:?}", out.text);
+    assert!(out.text.contains(" 31% | Compactar "), "{:?}", out.text);
+    assert!(out.text.contains(" 57% | Tempo "), "{:?}", out.text);
     assert_clock(&out.text, "01:05");
 }
 
@@ -17,7 +17,7 @@ fn claude_line_shows_every_segment() {
 fn missing_rate_limits_render_placeholders() {
     let temp = TempDir::new();
     let out = run(&temp, r#"{"model":{"display_name":"Opus 5.5"}}"#, Some(160));
-    assert!(out.text.starts_with(&format!("Opus 5.5 ╱ sessão {} –", "─".repeat(10))), "{:?}", out.text);
+    assert!(out.text.starts_with(&format!("Modelo Opus 5.5 | Sessão {} –", "─".repeat(10))), "{:?}", out.text);
 }
 
 #[test]
@@ -74,9 +74,55 @@ fn fills_the_usable_width_without_overflowing() {
 }
 
 #[test]
+fn every_segment_has_its_label_above_its_value_and_the_credit_closes_the_row() {
+    let temp = TempDir::new();
+    let claude = run(&temp, &claude("a", 0), Some(160));
+    assert_eq!(claude.width, 152);
+    assert!(claude.head.contains("◷ Sessão") && claude.head.contains("▦ Semana"), "{:?}", claude.head);
+    assert!(
+        claude.text.starts_with("Modelo Opus 5.5 High | Sessão ━") && claude.text.contains(" 72% ↻ "),
+        "{:?}",
+        claude.text
+    );
+    assert!(claude.text.ends_with("| By Isllan T."), "{:?}", claude.text);
+    let plain = run_with(&temp, &crate::common::claude("a", 0), Some(160), &[("NO_COLOR", "1")]);
+    let bars = |row: &str| row.chars().enumerate().filter(|(_, c)| *c == '│').map(|(i, _)| i).collect::<Vec<_>>();
+    let rows: Vec<&str> = plain.raw.split('\n').collect();
+    assert_eq!(rows.len(), 2, "{:?}", plain.raw);
+    assert_eq!(bars(rows[0]), bars(rows[1]), "{:?}", plain.raw);
+    let agy = run(
+        &temp,
+        r#"{"product":"antigravity","conversation_id":"c-9","model":{"display_name":"Gemini 3 Pro"}}"#,
+        None,
+    );
+    assert!(agy.text.ends_with("| By Isllan T."), "{:?}", agy.raw);
+}
+
+#[test]
+fn a_narrow_terminal_drops_the_credit_before_cutting_values() {
+    let temp = TempDir::new();
+    let out = run(&temp, &claude("a", 0), Some(70));
+    assert!(
+        out.text.starts_with("Modelo Opus 5.5 High | Sessão 72%") && out.text.contains("| Tempo 00:00:"),
+        "{:?}",
+        out.text
+    );
+    assert!(!out.raw.contains("Isllan"), "{:?}", out.raw);
+}
+
+#[test]
+fn very_narrow_terminals_drop_whole_columns_from_the_right() {
+    let temp = TempDir::new();
+    let out = run(&temp, &claude("a", 0), Some(60));
+    assert!(out.width <= 52, "{:?}", out.visible);
+    assert!(out.text.starts_with("Modelo Opus 5.5 High | Sessão 72% | Semana 31% | Compactar 57%"), "{:?}", out.text);
+    assert!(!out.text.contains("Tempo") && !out.text.ends_with('|'), "{:?}", out.text);
+}
+
+#[test]
 fn no_columns_means_no_padding() {
     let temp = TempDir::new();
-    assert!(run(&temp, &claude("a", 0), None).visible.starts_with("Opus"));
+    assert!(run(&temp, &claude("a", 0), None).visible.trim_start_matches('\u{2800}').starts_with("Opus 5.5 High"));
 }
 
 #[test]
@@ -94,9 +140,9 @@ fn agy_line_uses_quota_mode_and_terminal_width() {
         "context_window":{"used_percentage":40,"context_window_size":1000000},"terminal_width":150}"#;
     let out = run(&temp, input, None);
     assert_eq!(out.width, 142);
-    assert!(out.text.starts_with("Gemini 3 Pro - Planning ╱ cota "), "{:?}", out.text);
+    assert!(out.text.starts_with("Modelo Gemini 3 Pro Planning | Cota "), "{:?}", out.text);
     assert!(out.text.contains(" 25% ↻"), "{:?}", out.text);
-    assert!(out.text.contains("contexto ━━━━──────"), "{:?}", out.text);
+    assert!(out.text.contains("Contexto ━━━━──────"), "{:?}", out.text);
     assert_clock(&out.text, "00:00");
     assert_eq!(temp.cache_files(), ["agy-quota-groups.lock", "status_cli-agy-conv-1", "usage-agy.json"]);
 }
@@ -149,7 +195,7 @@ fn state_lives_in_a_dedicated_directory_created_on_demand() {
 fn utf8_bom_from_windows_powershell_is_accepted() {
     let temp = TempDir::new();
     let out = run(&temp, "\u{feff}{\"model\":{\"display_name\":\"Opus 5.5\"}}\r\n", None);
-    assert!(out.text.starts_with("Opus 5.5 ╱ "), "{:?}", out.text);
+    assert!(out.text.starts_with("Modelo Opus 5.5 | "), "{:?}", out.text);
 }
 
 #[test]
@@ -157,7 +203,8 @@ fn ascii_and_no_color_degrade_cleanly() {
     let temp = TempDir::new();
     let out = run_with(&temp, &claude("a", 0), Some(160), &[("STATUS_CLI_ASCII", "1"), ("NO_COLOR", "1")]);
     assert!(!out.raw.contains('\x1b'));
-    assert!(out.visible.trim_start().starts_with("Opus 5.5 - High / sessão ="), "{:?}", out.visible);
+    assert!(out.text.starts_with("Modelo Opus 5.5 High | Sessão ="), "{:?}", out.text);
+    assert!(!out.raw.contains('│') && !out.raw.contains('◷'), "{:?}", out.raw);
 }
 
 #[test]
@@ -178,7 +225,7 @@ fn agy_clock_starts_at_the_transcript_creation_time() {
     let input = r#"{"product":"antigravity","conversation_id":"c-1","model":{"display_name":"Gemini 3.8 Flash"},"terminal_width":150}"#;
     let out =
         run_with(&temp, input, None, &[("HOME", temp.0.to_str().unwrap()), ("USERPROFILE", temp.0.to_str().unwrap())]);
-    let clock = out.text.rsplit(' ').next().unwrap();
+    let clock = out.text.split(" | ").find(|cell| cell.starts_with("Tempo ")).unwrap().rsplit(' ').next().unwrap();
     let hours: u64 = clock.split(':').next().unwrap().parse().unwrap();
     assert!(hours > 200_000, "{:?}", out.text);
 }
