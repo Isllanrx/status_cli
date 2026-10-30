@@ -1,3 +1,5 @@
+mod turn;
+mod window;
 pub mod wrap;
 
 use std::env;
@@ -31,6 +33,7 @@ pub struct Reader {
     scanned_at: u64,
     stamp: Option<(u64, SystemTime)>,
     parsed: Option<(Payload, Option<u64>)>,
+    turns: turn::Turns,
 }
 
 struct Meta {
@@ -38,6 +41,13 @@ struct Meta {
     started: Option<u64>,
     cwd: Option<PathBuf>,
     subagent: bool,
+    source: Option<String>,
+}
+
+impl Meta {
+    fn started_by_cli(&self) -> bool {
+        !self.subagent && self.source.as_deref().is_none_or(|source| matches!(source, "cli" | "exec"))
+    }
 }
 
 impl Reader {
@@ -81,7 +91,7 @@ impl Reader {
         let stamp = Some((metadata.len(), metadata.modified()?));
         if self.stamp != stamp || self.parsed.is_none() {
             let meta = session_meta(file);
-            let mut payload = parse_session(file)?;
+            let mut payload = parse(file, &mut self.turns)?;
             payload.session_id = meta.as_ref().and_then(|meta| meta.id.clone());
             self.parsed = Some((payload, meta.and_then(|meta| meta.started)));
             self.stamp = stamp;
@@ -96,18 +106,16 @@ impl Reader {
 }
 
 pub fn parse_session(file: &Path) -> Result<Payload, Box<dyn Error>> {
+    parse(file, &mut turn::Turns::default())
+}
+
+fn parse(file: &Path, turns: &mut turn::Turns) -> Result<Payload, Box<dyn Error>> {
     let mut payload = Payload { product: Some("codex".to_owned()), ..Payload::default() };
+    let mut tokens = None;
     for record in tail_records(file)?.iter().rev() {
         let body = &record["payload"];
         match (record["type"].as_str(), body["type"].as_str()) {
-            (Some("turn_context"), _) if payload.model.is_none() => {
-                payload.model = body["model"].as_str().map(|model| Model {
-                    id: Some(model.to_owned()),
-                    display_name: Some(model.to_owned()),
-                    effort: None,
-                });
-                payload.effort = body["effort"].as_str().map(|level| Effort { level: level.to_owned() });
-            }
+            (Some("turn_context"), _) if payload.model.is_none() => apply_turn(&mut payload, body),
             (Some("event_msg"), Some("token_count")) => {
                 let limits = &body["rate_limits"];
                 if payload.rate_limits.is_none()
@@ -116,17 +124,40 @@ pub fn parse_session(file: &Path) -> Result<Payload, Box<dyn Error>> {
                 {
                     payload.rate_limits = Some(rate_limits(limits));
                 }
-                if payload.context_window.is_none() && body["info"].is_object() {
-                    payload.context_window = Some(context(&body["info"]));
+                let info = &body["info"];
+                if tokens.is_none() && info.is_object() {
+                    tokens = Some((
+                        info["last_token_usage"]["total_tokens"].as_f64(),
+                        info["model_context_window"].as_f64(),
+                    ));
                 }
             }
             _ => {}
         }
-        if payload.model.is_some() && payload.rate_limits.is_some() && payload.context_window.is_some() {
+        if payload.model.is_some() && payload.rate_limits.is_some() && tokens.is_some() {
             break;
         }
     }
+    if payload.model.is_none()
+        && let Some(body) = turns.latest(file)
+    {
+        apply_turn(&mut payload, body);
+    }
+    if let Some((used, size)) = tokens {
+        let model = payload.model.as_ref().and_then(|m| m.id.as_deref());
+        let size = size.or_else(|| window::usable(&codex_home()?, model?));
+        payload.context_window = Some(context(used, size));
+    }
     Ok(payload)
+}
+
+fn apply_turn(payload: &mut Payload, body: &Value) {
+    payload.model = body["model"].as_str().map(|model| Model {
+        id: Some(model.to_owned()),
+        display_name: Some(model.to_owned()),
+        effort: None,
+    });
+    payload.effort = body["effort"].as_str().map(|level| Effort { level: level.to_owned() });
 }
 
 fn rate_limits(limits: &Value) -> RateLimits {
@@ -143,9 +174,7 @@ fn rate_limits(limits: &Value) -> RateLimits {
     out
 }
 
-fn context(info: &Value) -> ContextWindow {
-    let size = info["model_context_window"].as_f64();
-    let used = info["last_token_usage"]["total_tokens"].as_f64();
+fn context(used: Option<f64>, size: Option<f64>) -> ContextWindow {
     let used_percentage = used.zip(size).and_then(|(used, size)| {
         let effective = size - CONTEXT_BASELINE_TOKENS;
         let remaining = (effective - (used - CONTEXT_BASELINE_TOKENS).max(0.0)) / effective;
@@ -215,6 +244,7 @@ fn latest_session(sessions: &Path) -> Option<PathBuf> {
         .flat_map(|day| fs::read_dir(day).into_iter().flatten().flatten())
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .filter(|path| session_meta(path).is_none_or(|meta| meta.started_by_cli()))
         .filter_map(|path| Some((fs::metadata(&path).ok()?.modified().ok()?, path)))
         .max_by_key(|(modified, _)| *modified)
         .map(|(_, path)| path)
@@ -245,6 +275,7 @@ fn session_meta(file: &Path) -> Option<Meta> {
         started: timestamp.and_then(parse_utc_millis),
         cwd: meta["cwd"].as_str().map(PathBuf::from),
         subagent: !meta["parent_thread_id"].is_null(),
+        source: meta["source"].as_str().map(str::to_owned),
     })
 }
 
@@ -265,7 +296,7 @@ fn launched_session(sessions: &Path, since: u64, cwd: &Path) -> Option<(PathBuf,
             let meta = session_meta(&path)?;
             let here = meta.cwd.as_deref().is_some_and(|dir| same_dir(dir, cwd));
             let fresh = meta.started.is_some_and(|started| started >= since);
-            (here && !meta.subagent).then_some(((fresh, modified), path))
+            (here && meta.started_by_cli()).then_some(((fresh, modified), path))
         })
         .max_by_key(|(key, _)| *key)
         .map(|((fresh, _), path)| (path, fresh))
@@ -288,6 +319,23 @@ fn window(value: &Value) -> Option<Window> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_cli_and_exec_sessions_are_read() {
+        let dir = std::env::temp_dir().join(format!("status_cli-codex-source-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let meta = |name: &str, payload: &str| {
+            let file = dir.join(name);
+            fs::write(&file, format!(r#"{{"type":"session_meta","payload":{payload}}}"#)).unwrap();
+            session_meta(&file).unwrap().started_by_cli()
+        };
+        assert!(meta("cli.jsonl", r#"{"source":"cli"}"#));
+        assert!(meta("exec.jsonl", r#"{"source":"exec"}"#));
+        assert!(meta("old.jsonl", "{}"));
+        assert!(!meta("desktop.jsonl", r#"{"source":"vscode","originator":"Codex Desktop"}"#));
+        assert!(!meta("child.jsonl", r#"{"source":{"subagent":{}},"parent_thread_id":"p"}"#));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn launch_shows_the_configured_model_and_account_limits_before_the_first_message() {
@@ -321,10 +369,8 @@ mod tests {
 
     #[test]
     fn context_matches_the_codex_formula() {
-        let info = serde_json::json!({"model_context_window": 200_000, "last_token_usage": {"total_tokens": 50_000}});
-        assert_eq!(context(&info).used_percentage.map(f64::round), Some(20.0));
-        let small = serde_json::json!({"model_context_window": 258_400, "last_token_usage": {"total_tokens": 8_000}});
-        assert_eq!(context(&small).used_percentage, Some(0.0));
+        assert_eq!(context(Some(50_000.0), Some(200_000.0)).used_percentage.map(f64::round), Some(20.0));
+        assert_eq!(context(Some(8_000.0), Some(258_400.0)).used_percentage, Some(0.0));
     }
 
     #[test]
