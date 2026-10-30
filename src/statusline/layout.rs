@@ -1,4 +1,4 @@
-use crate::render::style::{Cell, Frame, LABEL, SOFT, TRACK, paint, panel, truncate_visible, visible_width};
+use crate::render::style::{Cell, Frame, LABEL, RULE, gradient, paint, panel, truncate_visible, visible_width};
 use crate::render::terminal::caps;
 use crate::statusline::clock;
 use crate::statusline::context::Context;
@@ -51,9 +51,13 @@ impl Line {
         cells.extend(self.elapsed.map(|ms| clock::cell(ms, frame)));
         cells.truncate(keep);
         if credit {
-            cells.push(Cell { icon: None, head: String::new(), body: paint(SOFT, CREDIT) });
+            cells.push(Cell {
+                icon: None,
+                head: String::new(),
+                body: gradient(CREDIT, [121, 192, 255], [210, 168, 255]),
+            });
         }
-        let separator = paint(TRACK, format_args!(" {} ", caps().glyphs.separator));
+        let separator = paint(RULE, format_args!(" {} ", caps().glyphs.separator));
         let mut rows = [Vec::new(), Vec::new()];
         for cell in cells {
             let head = match cell.icon {
