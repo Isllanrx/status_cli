@@ -23,7 +23,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -35,7 +35,7 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
@@ -60,7 +60,7 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -80,7 +80,7 @@ jobs:
           otool -l "$bin" | awk '/LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX/ {found=1} found && /minos|version/ {print; exit}'
           codesign --force --sign - "$bin"
           codesign --verify "$bin"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: status_cli-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ matrix.bin }}
@@ -89,7 +89,7 @@ jobs:
     needs: build
     runs-on: macos-latest
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: status_cli-*-apple-darwin
       - run: |
@@ -97,7 +97,7 @@ jobs:
           codesign --force --sign - status_cli
           codesign --verify status_cli
           lipo -archs status_cli
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: status_cli-universal-apple-darwin
           path: status_cli
@@ -114,7 +114,7 @@ jobs:
           - { os: macos-15-intel, artifact: status_cli-universal-apple-darwin }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.artifact }}
           path: bin
@@ -147,7 +147,7 @@ jobs:
           - { os: windows-11-arm, artifact: status_cli-aarch64-pc-windows-msvc }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.artifact }}
           path: bin
@@ -189,7 +189,7 @@ jobs:
           - rockylinux:9
           - amazonlinux:2023
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: status_cli-x86_64-unknown-linux-musl
           path: bin
@@ -206,7 +206,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       publish: ${{ steps.version.outputs.publish }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: version
@@ -245,7 +245,7 @@ jobs:
     env:
       TAG: ${{ needs.version.outputs.tag }}
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           path: dist
       - run: |
@@ -274,7 +274,7 @@ jobs:
       TAG: ${{ needs.version.outputs.tag }}
       STATUS_CLI_BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - if: runner.os != 'Windows'
         run: |
           export HOME="$RUNNER_TEMP/home with space" && mkdir -p "$HOME/.claude"
