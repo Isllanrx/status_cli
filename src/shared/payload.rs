@@ -1,28 +1,45 @@
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer};
+use serde_json::Value;
 
 use crate::shared::time::parse_utc_millis;
 
 pub const MAX_COLUMNS: usize = 1000;
 const MAX_TEXT_CHARS: usize = 48;
 const MAX_KEY_CHARS: usize = 128;
+const MILLIS_FLOOR: f64 = 1e11;
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Payload {
+    #[serde(default, deserialize_with = "lenient")]
     pub session_id: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
     pub conversation_id: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
     pub transcript_path: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
     pub product: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
     pub model: Option<Model>,
+    #[serde(default, deserialize_with = "lenient")]
     pub effort: Option<Effort>,
+    #[serde(default, deserialize_with = "lenient")]
     pub execution_mode: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
     pub fast_mode: Option<bool>,
+    #[serde(default, deserialize_with = "lenient")]
     pub rate_limits: Option<RateLimits>,
+    #[serde(default, deserialize_with = "lenient")]
     pub quota: Option<BTreeMap<String, Quota>>,
+    #[serde(default, deserialize_with = "lenient")]
     pub context_window: Option<ContextWindow>,
+    #[serde(default, deserialize_with = "lenient")]
     pub cost: Option<Cost>,
+    #[serde(default, deserialize_with = "lenient")]
     pub workspace: Option<Workspace>,
+    #[serde(default, deserialize_with = "count")]
     pub terminal_width: Option<usize>,
     #[serde(skip)]
     pub usage_changed_at: Option<u64>,
@@ -30,13 +47,17 @@ pub struct Payload {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Workspace {
+    #[serde(default, deserialize_with = "lenient")]
     pub project_dir: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Model {
+    #[serde(default, deserialize_with = "lenient")]
     pub id: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
     pub display_name: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
     pub effort: Option<String>,
 }
 
@@ -47,22 +68,29 @@ pub struct Effort {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct RateLimits {
+    #[serde(default, deserialize_with = "lenient")]
     pub five_hour: Option<Window>,
+    #[serde(default, deserialize_with = "lenient")]
     pub seven_day: Option<Window>,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Window {
+    #[serde(default, deserialize_with = "lenient")]
     pub used_percentage: Option<f64>,
+    #[serde(default, deserialize_with = "lenient")]
     pub resets_at: Option<f64>,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Quota {
+    #[serde(default, deserialize_with = "lenient")]
     pub remaining_fraction: Option<f64>,
+    #[serde(default, deserialize_with = "lenient")]
     pub reset_time: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
     pub reset_in_seconds: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "flag")]
     pub disabled: bool,
 }
 
@@ -81,13 +109,30 @@ impl Quota {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct ContextWindow {
+    #[serde(default, deserialize_with = "lenient")]
     pub used_percentage: Option<f64>,
+    #[serde(default, deserialize_with = "lenient")]
     pub context_window_size: Option<f64>,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Cost {
+    #[serde(default, deserialize_with = "count")]
     pub total_duration_ms: Option<u64>,
+}
+
+fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned>(deserializer: D) -> Result<Option<T>, D::Error> {
+    Ok(serde_json::from_value(Value::deserialize(deserializer)?).ok())
+}
+
+fn count<'de, D: Deserializer<'de>, T: TryFrom<u64>>(deserializer: D) -> Result<Option<T>, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    let whole = value.as_u64().or_else(|| value.as_f64().filter(|v| v.is_finite() && *v >= 0.0).map(|v| v as u64));
+    Ok(whole.and_then(|v| T::try_from(v).ok()))
+}
+
+fn flag<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    Ok(Value::deserialize(deserializer)?.as_bool().unwrap_or(false))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,7 +165,8 @@ impl Payload {
         if let Some(limits) = &mut self.rate_limits {
             for window in [limits.five_hour.as_mut(), limits.seven_day.as_mut()].into_iter().flatten() {
                 window.used_percentage = percent(window.used_percentage);
-                window.resets_at = positive(window.resets_at);
+                window.resets_at =
+                    positive(window.resets_at).map(|at| if at > MILLIS_FLOOR { at / 1000.0 } else { at });
             }
         }
         for quota in self.quota.iter_mut().flat_map(|q| q.values_mut()) {
@@ -204,6 +250,23 @@ mod tests {
         assert_eq!(p.context_window.as_ref().unwrap().used_percentage, Some(100.0));
         assert_eq!(p.context_window.unwrap().context_window_size, None);
         assert_eq!(p.terminal_width, Some(MAX_COLUMNS));
+    }
+
+    #[test]
+    fn a_field_with_an_unexpected_type_is_dropped_instead_of_failing_the_line() {
+        let p = parse(
+            r#"{"session_id":7,"model":{"display_name":"Opus 5.5","effort":{}},"effort":"high","fast_mode":"no",
+               "cost":{"total_duration_ms":1234.0},"terminal_width":"wide",
+               "rate_limits":{"five_hour":{"used_percentage":"12","resets_at":1800000000000}},
+               "quota":{"a":{"remaining_fraction":0.5,"disabled":null,"reset_time":3}}}"#,
+        );
+        assert!(p.session_id.is_none() && p.effort.is_none() && p.fast_mode.is_none() && p.terminal_width.is_none());
+        assert_eq!(p.model.unwrap().display_name.as_deref(), Some("Opus 5.5"));
+        assert_eq!(p.cost.unwrap().total_duration_ms, Some(1234));
+        let five = p.rate_limits.unwrap().five_hour.unwrap();
+        assert_eq!((five.used_percentage, five.resets_at), (None, Some(1_800_000_000.0)));
+        let quota = &p.quota.unwrap()["a"];
+        assert_eq!((quota.remaining_fraction, quota.disabled, quota.reset_time.is_none()), (Some(0.5), false, true));
     }
 
     #[test]

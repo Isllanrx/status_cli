@@ -84,7 +84,9 @@ fn setup_turns_off_the_native_codex_line_without_losing_settings() {
     assert!(config.starts_with("model = \"gpt-6\""), "{config}");
     assert!(config.contains("screen_reader_detection_done = true"));
     assert!(config.contains("status_line = [\"raw-output\"]"), "{config}");
-    assert!(codex.join("config.toml.bak-status_cli").exists());
+    assert!(setup(&temp.0).status.success());
+    let backup = fs::read_to_string(codex.join("config.toml.bak-status_cli")).unwrap();
+    assert_eq!(backup, "model = \"gpt-6\"\n\n[tui]\nscreen_reader_detection_done = true\n");
 }
 
 #[test]

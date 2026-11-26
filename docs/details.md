@@ -67,14 +67,22 @@ To install by hand, download your platform's binary from the
 **Claude Code** runs `status_cli` from `statusLine` in `~/.claude/settings.json` (or `CLAUDE_CONFIG_DIR`) every
 second, through Git Bash or PowerShell on Windows. A `statusLine` in a project's `.claude/settings.json` takes
 precedence over it. Outside fullscreen mode Claude Code shows notifications on the right of the same row, where they
-can cover the end of the line. `subagentStatusLine` uses a different contract and is not supported.
+can cover the end of the line. The clock uses `cost.total_duration_ms`, capped by the age of the parent `claude`
+process on Windows and Linux: Claude Code accumulates that duration across resumes, so a session resumed in a new
+window would otherwise show days of earlier runs. On macOS, and when Claude Code runs under `node`, the accumulated
+value is shown. After `/clear` Claude Code starts a new session and the clock starts over with it.
 
 **agy** runs it from `statusLine` in `~/.gemini/antigravity-cli/settings.json`. The clock counts from when the
-`agy` window opened: status_cli walks up its parent processes to `agy` and reads that process's start time (Toolhelp
-on Windows, `ps` on Linux and macOS). If `agy` isn't among its parents, it counts from the conversation's first
-transcript entry instead. agy only runs the command when the agent changes state and has no refresh interval, so while
+`agy` window opened: status_cli walks up its parent processes to `agy` and reads that process's start time (on
+Windows from each process itself, on Linux from `/proc`, both well under a millisecond; macOS has no such lookup
+without starting `ps` every second, so there the run log below is used). If `agy` isn't among its parents, it counts from the newest agy run log
+(`~/.gemini/antigravity-cli/log/cli-*.log`, one per run) that mentions the conversation, using the log's creation
+time, and only then from the conversation's first transcript entry, which for a resumed conversation is days older
+than the window. agy only runs the command when the agent changes state and has no refresh interval, so while
 the agent sits idle the line keeps the last value it drew. Idle time is not lost: the next refresh shows the full
-time since the window opened.
+time since the window opened. For the same reason the gauges don't animate on agy: a change of model or usage is
+drawn at its new value right away, because a frame drawn mid-animation could stay on screen until the next state
+change.
 
 **Codex CLI** cannot run an external status line, so status_cli starts Codex for you; arguments pass through
 unchanged:
@@ -112,10 +120,15 @@ last row of the same terminal:
 - keys, mouse, paste and resizes pass straight through, and clicks on the status row are ignored;
 - the line is only drawn between Codex frames, so it never splits an escape sequence, link or synchronized update;
 - Codex's scroll regions are kept off the reserved row, also across alternate-screen switches;
-- the data comes from the session this launch started in the current folder (resumed sessions included, sub-agents
-  ignored, and so are rollouts whose `session_meta.source` is not `cli` or `exec`, such as Codex Desktop's
-  `vscode` ones, which carry no window or limits), with the model and effort from the session's last
-  `turn_context` (Codex writes it once per change, so it is read incrementally past the 256 KB tail), limits matched by window length and context computed the way Codex shows it (12k baseline over
+- the data comes from the session this launch started in the current folder (resumed sessions included). A rollout
+  counts when its `session_meta.source` is `cli` or `exec`, or another string such as `vscode` with an
+  `originator` of `codex-tui` or `codex_exec`: since Codex 0.157 the terminal UI can attach to the local app-server
+  daemon, which records its sessions as `vscode`. Codex Desktop's own sessions (`originator` "Codex Desktop", no
+  window or limits), sub-agents (`parent_thread_id`) and internal sessions (an object `source`, such as guardian or
+  review) are ignored. The model and effort come from the newest of the session's `turn_context` (once per turn) and
+  `thread_settings_applied` event (written as soon as `/model` or the effort changes, `thread_settings.model` and
+  `.reasoning_effort`), read incrementally past the 256 KB tail, so a switch shows before the next turn; limits are
+  matched by window length and context computed the way Codex shows it (12k baseline over
   `model_context_window`; when a `token_count` carries no window, the usable window Codex derives from
   `models_cache.json` for the model, `context_window` or `config.toml`'s `model_context_window` capped at
   `max_context_window`, times `effective_context_window_percent`); until Codex writes
@@ -159,7 +172,10 @@ value, while a session repeating an old reading does not. Usage can go down insi
 drops such as 97% to 93% with the same reset time), so the latest change wins, not the highest value. A reading with
 a reset time more than 15 minutes later starts a new window, and expired windows and sessions are dropped. Every open
 terminal then shows the same value, and a new session shows it before its first response. A window whose reset time
-has passed shows 0% until the host reports the new one, instead of the usage from before the reset.
+has passed shows 0% until the host reports the new one, instead of the usage from before the reset. agy reports a
+window that hasn't started yet (a group nobody used this week) with `reset_time` `1970-01-01T00:00:00Z` and the whole
+quota left; when a session newly reports that, the shared reading for the bucket is dropped, so an old 100% from
+another conversation doesn't stick.
 
 Model names and effort levels come straight from the host, so new models need no update. On agy, which bucket
 belongs to which model comes from agy itself: its status line payload only lists buckets by id, so status_cli keeps
@@ -168,8 +184,10 @@ with `gemini-5h` and `gemini-weekly`, "Claude and GPT models: Claude Opus, Claud
 "Gemini 4 Argon" with only `gemini-argon-wtu-weekly`) in `agy-quota-groups.json` in the cache folder. That query costs
 no quota and starts no conversation, but takes 3 to 4 seconds, close to the 5 seconds agy gives the status line, so it
 runs as a detached `status_cli agy-groups` when the file is missing, older than an hour or lacks a bucket the payload
-shows, at most once every two minutes (`agy-quota-groups.lock`). The model is matched to the group whose listed model
-(or group name) has all its words in the model name. Until the file exists, or for a model no group lists, the bucket
+shows, at most once every ten minutes (`agy-quota-groups.lock`), so a failing query or a bucket `/usage` never lists
+doesn't keep starting agy. The model is matched to the group whose listed model (or group name) has all its words in
+the model name, or whose listed model contains every word of a short name such as `Orchestrator` (listed as
+`Orchestrator (Neon)`). Until the file exists, or for a model no group lists, the bucket
 prefix sharing the most words with the model name is used instead. agy always shows `sessão` and `semana`: a group
 without a 5-hour bucket (Argon) or with a bucket agy marks `disabled` (the 5-hour limit of a group whose weekly limit
 is used up "does not currently apply") shows `–` there. The segment follows a model switch on the next run, which agy

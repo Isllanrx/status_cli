@@ -1,4 +1,5 @@
 mod launch;
+mod sessions;
 mod turn;
 mod window;
 pub mod wrap;
@@ -8,7 +9,7 @@ pub use launch::{GUARD_VAR, SHIM_VAR, command, installed_status_cli, interactive
 use std::env;
 use std::error::Error;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -16,14 +17,11 @@ use serde_json::Value;
 
 use crate::shared::payload::{ContextWindow, Cost, Effort, Model, Payload, RateLimits, Window};
 use crate::shared::telemetry;
-use crate::shared::time::parse_utc_millis;
 
 const TAIL_BYTES: u64 = 256 * 1024;
-const RECENT_DAYS: usize = 2;
 const RESCAN_MS: u64 = 5_000;
 
 const CONTEXT_BASELINE_TOKENS: f64 = 12_000.0;
-const LAUNCH_TOLERANCE_MS: u64 = 2_000;
 const DAY_MINUTES: u64 = 1_440;
 const LAUNCH_RESCAN_MS: u64 = 1_000;
 
@@ -40,20 +38,6 @@ pub struct Reader {
     turns: turn::Turns,
 }
 
-struct Meta {
-    id: Option<String>,
-    started: Option<u64>,
-    cwd: Option<PathBuf>,
-    subagent: bool,
-    source: Option<String>,
-}
-
-impl Meta {
-    fn started_by_cli(&self) -> bool {
-        !self.subagent && self.source.as_deref().is_none_or(|source| matches!(source, "cli" | "exec"))
-    }
-}
-
 impl Reader {
     pub fn latest() -> Self {
         Self { home: codex_home(), ..Self::default() }
@@ -68,14 +52,14 @@ impl Reader {
         let interval = if self.launch.is_some() { LAUNCH_RESCAN_MS } else { RESCAN_MS };
         let due = self.scanned_at == 0 || now.saturating_sub(self.scanned_at) >= interval;
         if due && (missing || !self.settled || self.launch.is_none()) {
-            let sessions = self.home.as_deref().ok_or("Codex home directory not found")?.join("sessions");
+            let root = self.home.as_deref().ok_or("Codex home directory not found")?.join("sessions");
             let file = match &self.launch {
                 Some((since, cwd)) => {
-                    let found = launched_session(&sessions, *since, cwd);
+                    let found = sessions::launched(&root, *since, cwd);
                     self.settled = found.as_ref().is_some_and(|(_, fresh)| *fresh);
                     found.map(|(path, _)| path)
                 }
-                None => latest_session(&sessions),
+                None => sessions::latest(&root),
             };
             if file != self.file {
                 self.parsed = None;
@@ -94,7 +78,7 @@ impl Reader {
         let metadata = fs::metadata(file)?;
         let stamp = Some((metadata.len(), metadata.modified()?));
         if self.stamp != stamp || self.parsed.is_none() {
-            let meta = session_meta(file);
+            let meta = sessions::meta(file);
             let mut payload = parse(file, &mut self.turns)?;
             payload.session_id = meta.as_ref().and_then(|meta| meta.id.clone());
             self.parsed = Some((payload, meta.and_then(|meta| meta.started)));
@@ -120,6 +104,9 @@ fn parse(file: &Path, turns: &mut turn::Turns) -> Result<Payload, Box<dyn Error>
         let body = &record["payload"];
         match (record["type"].as_str(), body["type"].as_str()) {
             (Some("turn_context"), _) if payload.model.is_none() => apply_turn(&mut payload, body),
+            (Some("event_msg"), Some("thread_settings_applied")) if payload.model.is_none() => {
+                apply_turn(&mut payload, &body["thread_settings"])
+            }
             (Some("event_msg"), Some("token_count")) => {
                 let limits = &body["rate_limits"];
                 if payload.rate_limits.is_none()
@@ -161,7 +148,8 @@ fn apply_turn(payload: &mut Payload, body: &Value) {
         display_name: Some(model.to_owned()),
         effort: None,
     });
-    payload.effort = body["effort"].as_str().map(|level| Effort { level: level.to_owned() });
+    let effort = body["effort"].as_str().or_else(|| body["reasoning_effort"].as_str());
+    payload.effort = effort.map(|level| Effort { level: level.to_owned() });
 }
 
 fn rate_limits(limits: &Value) -> RateLimits {
@@ -204,7 +192,7 @@ fn configured_model(home: &Path) -> Option<(String, Option<String>)> {
 }
 
 fn before_first_message(home: &Path) -> Payload {
-    let mut payload = latest_session(&home.join("sessions"))
+    let mut payload = sessions::latest(&home.join("sessions"))
         .and_then(|file| {
             telemetry::logged("codex.session", parse_session(&file).map_err(|err| format!("{}: {err}", file.display())))
         })
@@ -215,35 +203,6 @@ fn before_first_message(home: &Path) -> Payload {
         payload.effort = effort.map(|level| Effort { level });
     }
     payload
-}
-
-fn newest_children(dir: &Path, count: usize) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect();
-    dirs.sort_unstable_by(|a, b| b.cmp(a));
-    dirs.truncate(count);
-    dirs
-}
-
-fn latest_session(sessions: &Path) -> Option<PathBuf> {
-    let days: Vec<PathBuf> = newest_children(sessions, RECENT_DAYS)
-        .iter()
-        .flat_map(|year| newest_children(year, RECENT_DAYS))
-        .flat_map(|month| newest_children(&month, RECENT_DAYS))
-        .collect();
-    days.iter()
-        .flat_map(|day| fs::read_dir(day).into_iter().flatten().flatten())
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
-        .filter(|path| session_meta(path).is_none_or(|meta| meta.started_by_cli()))
-        .filter_map(|path| Some((fs::metadata(&path).ok()?.modified().ok()?, path)))
-        .max_by_key(|(modified, _)| *modified)
-        .map(|(_, path)| path)
 }
 
 fn tail_records(file: &Path) -> Result<Vec<Value>, Box<dyn Error>> {
@@ -265,53 +224,6 @@ fn tail_records(file: &Path) -> Result<Vec<Value>, Box<dyn Error>> {
     Ok(records.into_iter().flatten().collect())
 }
 
-fn session_meta(file: &Path) -> Option<Meta> {
-    let mut line = String::new();
-    BufReader::new(File::open(file).ok()?).read_line(&mut line).ok()?;
-    let record: Value = serde_json::from_str(&line).ok()?;
-    let meta = &record["payload"];
-    let timestamp = meta["timestamp"].as_str().or_else(|| record["timestamp"].as_str());
-    Some(Meta {
-        id: meta["id"].as_str().map(str::to_owned),
-        started: timestamp.and_then(parse_utc_millis),
-        cwd: meta["cwd"].as_str().map(PathBuf::from),
-        subagent: !meta["parent_thread_id"].is_null(),
-        source: meta["source"].as_str().map(str::to_owned),
-    })
-}
-
-fn launched_session(sessions: &Path, since: u64, cwd: &Path) -> Option<(PathBuf, bool)> {
-    let since = since.saturating_sub(LAUNCH_TOLERANCE_MS);
-    let since_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(since);
-    let children = |dir: &Path| newest_children(dir, usize::MAX);
-    children(sessions)
-        .iter()
-        .flat_map(|year| children(year))
-        .flat_map(|month| children(&month))
-        .flat_map(|day| fs::read_dir(day).into_iter().flatten().flatten())
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
-        .filter_map(|path| Some((fs::metadata(&path).ok()?.modified().ok()?, path)))
-        .filter(|(modified, _)| *modified >= since_time)
-        .filter_map(|(modified, path)| {
-            let meta = session_meta(&path)?;
-            let here = meta.cwd.as_deref().is_some_and(|dir| same_dir(dir, cwd));
-            let fresh = meta.started.is_some_and(|started| started >= since);
-            (here && meta.started_by_cli()).then_some(((fresh, modified), path))
-        })
-        .max_by_key(|(key, _)| *key)
-        .map(|((fresh, _), path)| (path, fresh))
-}
-
-fn same_dir(a: &Path, b: &Path) -> bool {
-    let normalize = |path: &Path| {
-        let text = path.to_string_lossy().replace('\\', "/");
-        let text = text.trim_end_matches('/').to_owned();
-        if cfg!(windows) { text.to_lowercase() } else { text }
-    };
-    normalize(a) == normalize(b)
-}
-
 fn window(value: &Value) -> Option<Window> {
     let used = value["used_percent"].as_f64()?;
     Some(Window { used_percentage: Some(used), resets_at: value["resets_at"].as_f64() })
@@ -322,19 +234,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_cli_and_exec_sessions_are_read() {
-        let dir = std::env::temp_dir().join(format!("status_cli-codex-source-{}", std::process::id()));
+    fn a_model_switch_shows_before_the_next_turn() {
+        let dir = std::env::temp_dir().join(format!("status_cli-codex-switch-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let meta = |name: &str, payload: &str| {
-            let file = dir.join(name);
-            fs::write(&file, format!(r#"{{"type":"session_meta","payload":{payload}}}"#)).unwrap();
-            session_meta(&file).unwrap().started_by_cli()
-        };
-        assert!(meta("cli.jsonl", r#"{"source":"cli"}"#));
-        assert!(meta("exec.jsonl", r#"{"source":"exec"}"#));
-        assert!(meta("old.jsonl", "{}"));
-        assert!(!meta("desktop.jsonl", r#"{"source":"vscode","originator":"Codex Desktop"}"#));
-        assert!(!meta("child.jsonl", r#"{"source":{"subagent":{}},"parent_thread_id":"p"}"#));
+        let file = dir.join("rollout.jsonl");
+        let lines = [
+            r#"{"type":"turn_context","payload":{"model":"gpt-a","effort":"medium"}}"#,
+            r#"{"type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-b","reasoning_effort":"xhigh"}}}"#,
+        ];
+        fs::write(&file, lines.join("\n") + "\n").unwrap();
+        let payload = parse_session(&file).unwrap();
+        assert_eq!(payload.model.and_then(|m| m.display_name).as_deref(), Some("gpt-b"));
+        assert_eq!(payload.effort.map(|e| e.level).as_deref(), Some("xhigh"));
         fs::remove_dir_all(&dir).unwrap();
     }
 

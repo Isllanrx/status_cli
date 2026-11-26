@@ -2,13 +2,15 @@ use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use super::same_dir;
+use super::sessions::same_dir;
 
 pub const SHIM_VAR: &str = "STATUS_CLI_SHIM";
 pub const GUARD_VAR: &str = "STATUS_CLI_IN_CODEX";
 
 const PLAIN_FLAGS: [&str; 4] = ["-h", "--help", "-V", "--version"];
-const SUBCOMMANDS: [&str; 32] = [
+const SUBCOMMANDS: [&str; 34] = [
+    "help",
+    "git-credential",
     "agents",
     "tcp-tunnel",
     "exec",

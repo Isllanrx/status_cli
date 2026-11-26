@@ -27,7 +27,12 @@ pub fn is_guard(text: &str) -> bool {
 pub fn merge(hooks: &mut Map<String, Value>, events: &[Event], command: &str) {
     for groups in hooks.values_mut() {
         if let Value::Array(groups) = groups {
-            groups.retain(|group| !mentions_guard(group));
+            groups.retain_mut(|group| {
+                let Some(handlers) = group.get_mut("hooks").and_then(Value::as_array_mut) else { return true };
+                let before = handlers.len();
+                handlers.retain(|handler| !handler["command"].as_str().is_some_and(is_guard));
+                handlers.len() == before || !handlers.is_empty()
+            });
         }
     }
     hooks.retain(|_, groups| groups.as_array().is_none_or(|groups| !groups.is_empty()));
@@ -44,10 +49,6 @@ pub fn merge(hooks: &mut Map<String, Value>, events: &[Event], command: &str) {
             *groups = json!([group]);
         }
     }
-}
-
-fn mentions_guard(group: &Value) -> bool {
-    group["hooks"].as_array().is_some_and(|hooks| hooks.iter().any(|h| h["command"].as_str().is_some_and(is_guard)))
 }
 
 pub fn agy_plugin(command: &str) -> (String, String) {
@@ -86,6 +87,18 @@ mod tests {
         assert_eq!(hooks["PreToolUse"][1]["matcher"], "Agent|Task|Workflow");
         assert_eq!(hooks["UserPromptSubmit"].as_array().unwrap().len(), 1);
         assert!(hooks["UserPromptSubmit"][0].get("matcher").is_none());
+    }
+
+    #[test]
+    fn merge_keeps_a_user_hook_that_shares_a_group_with_the_guard() {
+        let mut hooks = json!({ "UserPromptSubmit": [{ "hooks": [
+            { "type": "command", "command": "status_cli guard claude" },
+            { "type": "command", "command": "my-hook" }
+        ] }] });
+        merge(hooks.as_object_mut().unwrap(), CLAUDE_EVENTS, "status_cli guard claude");
+        let groups = hooks["UserPromptSubmit"].as_array().unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0]["hooks"], json!([{ "type": "command", "command": "my-hook" }]));
     }
 
     #[test]

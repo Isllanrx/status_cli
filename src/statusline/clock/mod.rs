@@ -14,9 +14,15 @@ use crate::shared::state::Session;
 use crate::shared::telemetry;
 use crate::shared::time::parse_utc_millis;
 
+const MAX_RUN_LOGS: usize = 100;
+
 pub fn read(payload: &Payload, session: &mut Session, now: u64) -> Option<u64> {
     let base_ms = match payload.host() {
-        Host::Claude | Host::Codex => payload.cost.as_ref()?.total_duration_ms?,
+        Host::Claude => {
+            let total = payload.cost.as_ref()?.total_duration_ms?;
+            in_window(total, process::ancestor_started("claude", now), now)
+        }
+        Host::Codex => payload.cost.as_ref()?.total_duration_ms?,
         Host::Agy => {
             payload.session_key()?;
             process::ancestor_started("agy", now)
@@ -25,6 +31,10 @@ pub fn read(payload: &Payload, session: &mut Session, now: u64) -> Option<u64> {
         }
     };
     Some(session.elapsed(base_ms))
+}
+
+fn in_window(total: u64, window_started: Option<u64>, now: u64) -> u64 {
+    window_started.map_or(total, |started| total.min(now.saturating_sub(started)))
 }
 
 fn conversation_started(payload: &Payload) -> Option<u64> {
@@ -36,9 +46,28 @@ fn conversation_started(payload: &Payload) -> Option<u64> {
         .join(".gemini")
         .join("antigravity-cli");
     let transcript = home.join("brain").join(id).join(".system_generated").join("logs").join("transcript.jsonl");
-    first_created_at(&transcript)
+    run_started(&home.join("log"), id)
+        .or_else(|| first_created_at(&transcript))
         .or_else(|| payload.transcript_path.as_deref().and_then(|path| first_created_at(Path::new(path))))
         .or_else(|| file_created(&home.join("conversations").join(format!("{id}.db"))))
+}
+
+fn run_started(logs: &Path, id: &str) -> Option<u64> {
+    let mut runs: Vec<PathBuf> = fs::read_dir(logs)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .is_some_and(|name| name.starts_with("cli-") && name.ends_with(".log"))
+        })
+        .collect();
+    runs.sort();
+    let run = runs.iter().rev().take(MAX_RUN_LOGS).find(|log| {
+        telemetry::read_optional("clock.runs", log).is_some_and(|text| String::from_utf8_lossy(&text).contains(id))
+    })?;
+    file_created(run)
 }
 
 fn first_created_at(transcript: &Path) -> Option<u64> {
@@ -89,6 +118,14 @@ mod tests {
         assert_eq!(flat(cell(59_000, &Frame { tight: true, ..frame })), "Tempo 00:00:59");
         assert_eq!(flat(cell(86_399_000, &frame)), "Tempo 23:59:59");
         assert_eq!(flat(cell(2 * 86_400_000 + 12_324_000, &frame)), "Tempo 2d 03:25:24");
+    }
+
+    #[test]
+    fn claude_counts_a_resumed_session_from_its_window() {
+        let now = 10_000_000_000;
+        assert_eq!(in_window(352_337_000, Some(now - 360_000), now), 360_000);
+        assert_eq!(in_window(5_000, Some(now - 60_000), now), 5_000);
+        assert_eq!(in_window(7_000, None, now), 7_000);
     }
 
     #[test]

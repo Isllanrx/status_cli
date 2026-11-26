@@ -1,6 +1,7 @@
 use std::env;
 use std::error::Error;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
@@ -103,7 +104,9 @@ pub fn doctor() -> (Vec<String>, bool) {
     let mut configured = 0;
     for host in hosts(&home) {
         let installed = host.installed.is_dir();
-        let ready = fs::read_to_string(&host.settings).is_ok_and(|text| match &host.config {
+        let bytes = fs::read(&host.settings).ok();
+        let zeroed = bytes.as_ref().is_some_and(|bytes| bytes.contains(&0));
+        let ready = bytes.and_then(|bytes| String::from_utf8(bytes).ok()).is_some_and(|text| match &host.config {
             Config::Json { status_line, guard } => {
                 (status_line.is_none() || text.contains("status_cli")) && (guard.is_none() || hooks::is_guard(&text))
             }
@@ -112,6 +115,14 @@ pub fn doctor() -> (Vec<String>, bool) {
         });
         lines.push(match (installed, ready) {
             (false, _) => format!("skip    {} is not installed", host.name),
+            (true, _) if zeroed => {
+                healthy = false;
+                format!(
+                    "broken  {} contains NUL bytes (a crash during a write, or a UTF-16 file); fix it or restore {} (taken before status_cli first changed it), then run status_cli setup",
+                    host.settings.display(),
+                    with_suffix(&host.settings, ".bak-status_cli").display()
+                )
+            }
             (true, true) => {
                 configured += 1;
                 format!("ok      {} -> {}", host.name, host.settings.display())
@@ -231,15 +242,23 @@ fn configure(host: &Host) -> Result<Option<PathBuf>, Box<dyn Error>> {
     let backup = match existing {
         Some(bytes) => {
             let backup = with_suffix(&host.settings, ".bak-status_cli");
-            fs::write(&backup, bytes)?;
+            if !backup.exists() {
+                write_synced(&backup, &bytes)?;
+            }
             Some(backup)
         }
         None => None,
     };
     let staging = with_suffix(&host.settings, ".tmp-status_cli");
-    fs::write(&staging, updated)?;
+    write_synced(&staging, updated.as_bytes())?;
     fs::rename(&staging, &host.settings)?;
     Ok(backup)
+}
+
+fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 fn merge_json(

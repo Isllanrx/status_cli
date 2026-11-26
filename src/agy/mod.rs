@@ -15,7 +15,7 @@ use crate::shared::telemetry;
 const FILE: &str = "agy-quota-groups.json";
 const LOCK: &str = "agy-quota-groups.lock";
 const REFRESH_MS: u64 = 3_600_000;
-const RETRY_MS: u64 = 120_000;
+const RETRY_MS: u64 = 600_000;
 const TIMEOUT: Duration = Duration::from_secs(60);
 const MODELS_PREFIX: &str = "Models within this group:";
 
@@ -49,8 +49,12 @@ impl Groups {
                     .iter()
                     .chain([&group.name])
                     .map(|candidate| words(candidate))
-                    .filter(|candidate| !candidate.is_empty() && candidate.iter().all(|word| model.contains(word)))
-                    .map(|candidate| candidate.len())
+                    .filter_map(|candidate| {
+                        let within =
+                            |a: &[String], b: &[String]| !a.is_empty() && a.iter().all(|word| b.contains(word));
+                        let forward = within(&candidate, &model);
+                        (forward || within(&model, &candidate)).then_some((forward, candidate.len().min(model.len())))
+                    })
                     .max()?;
                 Some((best, group))
             })
@@ -212,6 +216,15 @@ mod tests {
         assert_eq!(name("Claude Sonnet 4.6 (Thinking)").as_deref(), Some("Claude and GPT models"));
         assert_eq!(name("GPT-OSS 120B (Medium)").as_deref(), Some("Claude and GPT models"));
         assert_eq!(name("Mystery Model"), None);
+        let orchestrated = Groups {
+            fetched_at: 0,
+            groups: vec![Group {
+                name: "Gemini Models".into(),
+                models: vec!["Gemini 4 Neon".into(), "Orchestrator (Neon)".into()],
+                buckets: vec![],
+            }],
+        };
+        assert_eq!(orchestrated.group_for("Orchestrator").map(|g| g.name.as_str()), Some("Gemini Models"));
     }
 
     #[test]

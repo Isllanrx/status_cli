@@ -51,6 +51,7 @@ pub struct Session {
     saved: Snapshot,
     current: Snapshot,
     now: u64,
+    animate: bool,
 }
 
 impl Session {
@@ -62,12 +63,17 @@ impl Session {
         }
         let saved = saved.unwrap_or_default();
         let current = Snapshot { clock: saved.clock, gauges: saved.gauges.clone() };
-        Self { file, saved, current, now }
+        Self { file, saved, current, now, animate: true }
+    }
+
+    pub fn without_motion(mut self) -> Self {
+        self.animate = false;
+        self
     }
 
     #[cfg(test)]
     pub fn detached(now: u64) -> Self {
-        Self { file: None, saved: Snapshot::default(), current: Snapshot::default(), now }
+        Self { file: None, saved: Snapshot::default(), current: Snapshot::default(), now, animate: true }
     }
 
     pub fn elapsed(&mut self, base_ms: u64) -> u64 {
@@ -91,7 +97,8 @@ impl Session {
             resets_at: None,
         });
         if pct.round() != trend.to.round() {
-            *trend = Trend { from: trend.shown(now), to: pct, changed_at: now, ..*trend };
+            let from = if self.animate { trend.shown(now) } else { pct };
+            *trend = Trend { from, to: pct, changed_at: now, ..*trend };
         } else {
             let shift = pct - trend.to;
             trend.from += shift;
@@ -212,6 +219,16 @@ mod tests {
         assert_eq!(shown(&mut s, 40.0), Some((40.0, false)));
         assert_eq!(shown(&mut s, 20.0), Some((40.0, false)));
         assert!(s.track("x", None).is_none());
+    }
+
+    #[test]
+    fn hosts_without_a_refresh_timer_show_the_new_value_at_once() {
+        let mut s = Session::detached(0).without_motion();
+        s.track("x", Some(22.0));
+        s.now = 400;
+        assert_eq!(s.track("x", Some(0.0)).map(|m| (m.shown, m.growing)), Some((0.0, false)));
+        s.now = 800;
+        assert_eq!(s.track("x", Some(69.0)).map(|m| (m.shown, m.growing)), Some((69.0, false)));
     }
 
     #[test]

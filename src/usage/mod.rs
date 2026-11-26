@@ -12,6 +12,8 @@ use crate::shared::state::write_atomic;
 use crate::shared::telemetry;
 
 const SAME_WINDOW_MS: u64 = 15 * 60_000;
+const NOT_STARTED: u64 = 0;
+const NOT_STARTED_TTL_MS: u64 = 7 * 86_400_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 struct Reading {
@@ -83,16 +85,29 @@ fn readings(payload: &Payload, now: u64) -> Readings {
 
 fn merge(stored: &Store, source: Option<String>, current: Readings, now: u64) -> Store {
     let live = |readings: &Readings| -> Readings {
-        readings.iter().filter(|(_, r)| r.resets_at > now).map(|(k, r)| (k.clone(), *r)).collect()
+        let kept = |r: &Reading| {
+            r.resets_at > now || (r.resets_at == NOT_STARTED && now.saturating_sub(r.changed_at) < NOT_STARTED_TTL_MS)
+        };
+        readings.iter().filter(|(_, r)| kept(r)).map(|(k, r)| (k.clone(), *r)).collect()
     };
     let mut shared = live(&stored.shared);
     let mut sources: BTreeMap<String, Readings> =
         stored.sources.iter().map(|(k, r)| (k.clone(), live(r))).filter(|(_, r)| !r.is_empty()).collect();
     let previous = source.as_ref().map(|source| stored.sources.get(source).cloned().unwrap_or_default());
     let mut reported = Readings::new();
-    for (key, reading) in live(&current) {
+    for (key, reading) in current {
         let last = previous.as_ref().and_then(|p| p.get(&key)).filter(|old| same(old, &reading));
         let changed = previous.is_some() && last.is_none();
+        if reading.resets_at == NOT_STARTED {
+            if changed {
+                shared.remove(&key);
+            }
+            reported.insert(key, last.copied().unwrap_or(reading));
+            continue;
+        }
+        if reading.resets_at <= now {
+            continue;
+        }
         let known = shared.get(&key);
         let mut next = match known {
             Some(known) if newer_window(known, &reading) => *known,
@@ -222,6 +237,20 @@ mod tests {
     fn expired_readings_and_sources_are_dropped() {
         let stored = store("a", "seven_day", reading(50.0, NOW - 1));
         assert_eq!(merge(&stored, None, Readings::new(), NOW), Store::default());
+    }
+
+    #[test]
+    fn a_window_that_has_not_started_clears_the_old_reading() {
+        let stored = store("old", "3p-weekly", reading(100.0, NOW + 3_600_000));
+        let idle = reading(0.0, NOT_STARTED);
+        let merged = merge(&stored, Some("new".to_owned()), one("3p-weekly", idle), NOW);
+        assert!(!merged.shared.contains_key("3p-weekly"));
+        let again = merge(&merged, Some("new".to_owned()), one("3p-weekly", idle), NOW);
+        assert_eq!(again, merged);
+        let used = reading(40.0, NOW + 3_600_000);
+        let other = merge(&again, Some("busy".to_owned()), one("3p-weekly", used), NOW);
+        let repeated = merge(&other, Some("new".to_owned()), one("3p-weekly", idle), NOW + 1_000);
+        assert_eq!(repeated.shared["3p-weekly"].used, 40.0);
     }
 
     #[test]

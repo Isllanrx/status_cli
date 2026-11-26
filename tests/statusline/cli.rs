@@ -231,3 +231,21 @@ fn agy_clock_starts_at_the_transcript_creation_time() {
     let days: u64 = clock.split(' ').nth(1).unwrap().trim_end_matches('d').parse().unwrap();
     assert!(days > 8_000, "{:?}", out.text);
 }
+
+#[test]
+fn agy_clock_prefers_the_run_that_opened_the_conversation() {
+    let temp = TempDir::new();
+    let agy = temp.0.join(".gemini").join("antigravity-cli");
+    let logs = agy.join("brain").join("c-1").join(".system_generated").join("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(logs.join("transcript.jsonl"), "{\"step_index\":0,\"created_at\":\"2000-01-01T00:00:00Z\"}\n")
+        .unwrap();
+    std::fs::create_dir_all(agy.join("log")).unwrap();
+    std::fs::write(agy.join("log").join("cli-20261123_195743.log"), "Continuing last-used conversation: c-1\n")
+        .unwrap();
+    std::fs::write(agy.join("log").join("cli-20261124_063411.log"), "Starting conversation c-2\n").unwrap();
+    let input = r#"{"product":"antigravity","conversation_id":"c-1","model":{"display_name":"Gemini 3.8 Flash"},"terminal_width":150}"#;
+    let out =
+        run_with(&temp, input, None, &[("HOME", temp.0.to_str().unwrap()), ("USERPROFILE", temp.0.to_str().unwrap())]);
+    assert_clock(&out.text, "00:00");
+}

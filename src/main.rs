@@ -86,7 +86,8 @@ fn main() {
     });
     let output = match &payload {
         Ok(payload) => {
-            let mut session = Session::open(&cache_dir(), payload.session_key().as_deref(), now);
+            let session = Session::open(&cache_dir(), payload.session_key().as_deref(), now);
+            let mut session = if payload.host() == Host::Agy { session.without_motion() } else { session };
             timer.mark("state_load");
             let line = line(payload, now, &mut session);
             timer.mark("features");

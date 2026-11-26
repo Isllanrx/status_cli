@@ -5,7 +5,14 @@ use std::path::{Path, PathBuf};
 use crate::shared::telemetry;
 use serde_json::Value;
 
-const MARKER: &[u8] = b"\"turn_context\"";
+const MARKERS: [&[u8]; 2] = [b"\"turn_context\"", b"\"thread_settings_applied\""];
+
+fn settings(record: &Value) -> Option<&Value> {
+    if record["type"] == "turn_context" {
+        return Some(&record["payload"]);
+    }
+    (record["payload"]["type"] == "thread_settings_applied").then_some(&record["payload"]["thread_settings"])
+}
 
 #[derive(Default)]
 pub struct Turns {
@@ -31,11 +38,11 @@ impl Turns {
                     Ok(read @ 1..) if line.ends_with(b"\n") => self.offset += read as u64,
                     _ => break,
                 }
-                if line.windows(MARKER.len()).any(|window| window == MARKER)
+                if MARKERS.iter().any(|marker| line.windows(marker.len()).any(|window| window == *marker))
                     && let Ok(record) = serde_json::from_slice::<Value>(&line)
-                    && record["type"] == "turn_context"
+                    && let Some(settings) = settings(&record)
                 {
-                    self.last = Some(record["payload"].clone());
+                    self.last = Some(settings.clone());
                 }
             }
         }
@@ -62,6 +69,8 @@ mod tests {
         append.write_all(turn("gpt-b").as_bytes()).unwrap();
         append.write_all(b"{\"type\":\"turn_context\",\"payload\":{\"model\":\"partial").unwrap();
         assert_eq!(turns.latest(&file).and_then(|t| t["model"].as_str()), Some("gpt-b"));
+        append.write_all(b"\n{\"type\":\"event_msg\",\"payload\":{\"type\":\"thread_settings_applied\",\"thread_settings\":{\"model\":\"gpt-c\"}}}\n").unwrap();
+        assert_eq!(turns.latest(&file).and_then(|t| t["model"].as_str()), Some("gpt-c"));
         fs::remove_dir_all(&dir).unwrap();
     }
 }
